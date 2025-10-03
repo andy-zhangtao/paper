@@ -1,8 +1,14 @@
+import { useState } from 'react'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { PaperList } from '@/features/papers/PaperList'
+import { NewPaperPage } from '@/pages/NewPaper'
 import { mockPapers } from '@/lib/mock'
 
+type View = 'list' | 'new-paper'
+
 function App() {
+  const [currentView, setCurrentView] = useState<View>('list')
+
   // 转换 mock 数据格式（archived 字段）
   const papers = mockPapers.map(p => ({
     ...p,
@@ -10,7 +16,7 @@ function App() {
   }))
 
   const handleCreatePaper = () => {
-    alert('创建论文功能待实现')
+    setCurrentView('new-paper')
   }
 
   const handleEditPaper = (id: string) => {
@@ -19,6 +25,10 @@ function App() {
 
   const handleDeletePaper = (id: string) => {
     alert(`删除论文 ${id}`)
+  }
+
+  if (currentView === 'new-paper') {
+    return <NewPaperPage />
   }
 
   return (

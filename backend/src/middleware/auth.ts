@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { JWT_CONFIG } from '../config/constants';
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -23,7 +24,7 @@ export const authMiddleware = (
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+    const decoded = jwt.verify(token, JWT_CONFIG.secret) as {
       userId: string;
     };
     req.userId = decoded.userId;
@@ -38,3 +39,6 @@ export const authMiddleware = (
     });
   }
 };
+
+// 导出别名以支持不同的命名习惯
+export const authenticate = authMiddleware;

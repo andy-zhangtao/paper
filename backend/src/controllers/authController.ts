@@ -8,6 +8,7 @@ import {
   validatePassword,
   validatePhone,
 } from '../utils/validation';
+import { JWT_CONFIG, REWARDS } from '../config/constants';
 
 /**
  * 用户注册
@@ -70,27 +71,27 @@ export const register = async (req: Request, res: Response) => {
     // 5. 加密密码
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 6. 创建用户（初始赠送100积分）
+    // 6. 创建用户（初始赠送注册积分）
     const userId = uuidv4();
     const now = new Date();
 
     await pool.query(
       `INSERT INTO users (id, email, password, phone, credits, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [userId, email, hashedPassword, phone || null, 100, now, now]
+      [userId, email, hashedPassword, phone || null, REWARDS.registration, now, now]
     );
 
     // 7. 生成JWT token
     const accessToken = jwt.sign(
       { userId },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      JWT_CONFIG.secret as string,
+      { expiresIn: JWT_CONFIG.expiresIn } as jwt.SignOptions
     );
 
     const refreshToken = jwt.sign(
       { userId },
-      process.env.JWT_REFRESH_SECRET!,
-      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
+      JWT_CONFIG.refreshSecret as string,
+      { expiresIn: JWT_CONFIG.refreshExpiresIn } as jwt.SignOptions
     );
 
     // 8. 返回用户信息和token
@@ -100,12 +101,12 @@ export const register = async (req: Request, res: Response) => {
         user: {
           id: userId,
           email,
-          credits: 100,
+          credits: REWARDS.registration,
         },
         tokens: {
           access_token: accessToken,
           refresh_token: refreshToken,
-          expires_in: 604800, // 7天（秒）
+          expires_in: JWT_CONFIG.expiresInSeconds,
         },
       },
       message: '注册成功',
@@ -163,14 +164,14 @@ export const login = async (req: Request, res: Response) => {
     // 3. 生成JWT token
     const accessToken = jwt.sign(
       { userId: user.id },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      JWT_CONFIG.secret as string,
+      { expiresIn: JWT_CONFIG.expiresIn } as jwt.SignOptions
     );
 
     const refreshToken = jwt.sign(
       { userId: user.id },
-      process.env.JWT_REFRESH_SECRET!,
-      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
+      JWT_CONFIG.refreshSecret as string,
+      { expiresIn: JWT_CONFIG.refreshExpiresIn } as jwt.SignOptions
     );
 
     // 4. 返回用户信息和token
@@ -185,7 +186,7 @@ export const login = async (req: Request, res: Response) => {
         tokens: {
           access_token: accessToken,
           refresh_token: refreshToken,
-          expires_in: 604800,
+          expires_in: JWT_CONFIG.expiresInSeconds,
         },
       },
       message: '登录成功',
@@ -222,21 +223,21 @@ export const refreshToken = async (req: Request, res: Response) => {
     // 验证refresh token
     const decoded = jwt.verify(
       refresh_token,
-      process.env.JWT_REFRESH_SECRET!
+      JWT_CONFIG.refreshSecret
     ) as { userId: string };
 
     // 生成新的access token
     const newAccessToken = jwt.sign(
       { userId: decoded.userId },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      JWT_CONFIG.secret as string,
+      { expiresIn: JWT_CONFIG.expiresIn } as jwt.SignOptions
     );
 
     return res.status(200).json({
       success: true,
       data: {
         access_token: newAccessToken,
-        expires_in: 604800,
+        expires_in: JWT_CONFIG.expiresInSeconds,
       },
       message: 'Token刷新成功',
     });

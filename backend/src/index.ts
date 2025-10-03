@@ -3,23 +3,31 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { testConnection } from './config/database';
 import authRoutes from './routes/authRoutes';
+import { SERVER_CONFIG, CORS_CONFIG } from './config/constants';
 
 // 加载环境变量
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // 中间件
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-  credentials: true,
+  origin: CORS_CONFIG.origin,
+  credentials: CORS_CONFIG.credentials,
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // 路由
 app.use('/api/auth', authRoutes);
+import paperRoutes from './routes/paperRoutes';
+app.use('/api/papers', paperRoutes);
+import creditsRoutes from './routes/creditsRoutes';
+app.use('/api/credits', creditsRoutes);
+import aiRoutes from './routes/aiRoutes';
+app.use('/api/ai', aiRoutes);
+import userRoutes from './routes/userRoutes';
+app.use('/api/user', userRoutes);
 
 // 健康检查
 app.get('/health', (req: Request, res: Response) => {
@@ -41,11 +49,11 @@ async function startServer() {
       process.exit(1);
     }
 
-    app.listen(PORT, () => {
+    app.listen(SERVER_CONFIG.port, () => {
       console.log(`
-🚀 Server running on http://localhost:${PORT}
-📝 API docs: http://localhost:${PORT}/api
-🔧 Environment: ${process.env.NODE_ENV || 'development'}
+🚀 Server running on http://localhost:${SERVER_CONFIG.port}
+📝 API docs: http://localhost:${SERVER_CONFIG.port}/api
+🔧 Environment: ${SERVER_CONFIG.env}
       `);
     });
   } catch (error) {

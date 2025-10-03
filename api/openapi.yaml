@@ -1,0 +1,943 @@
+openapi: 3.0.3
+info:
+  title: 智能论文写作辅助平台 API
+  description: |
+    面向大学生的AI论文辅助工具API文档
+
+    ## 核心功能
+    - 用户认证与积分管理
+    - 论文编辑与版本管理
+    - AI智能润色与生成
+    - 充值支付系统
+
+    ## 认证方式
+    使用JWT Bearer Token认证
+
+    ## 代理配置
+    ⚠️ 后端调用OpenRouter API需要代理，详见技术文档
+
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@yourapp.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000/api
+    description: 本地开发环境
+  - url: https://api.yourapp.com/api
+    description: 生产环境
+
+tags:
+  - name: 认证
+    description: 用户注册、登录、Token管理
+  - name: 积分
+    description: 积分查询、流水记录
+  - name: 论文
+    description: 论文CRUD、版本管理
+  - name: AI服务
+    description: 智能润色、大纲生成、语法检查
+  - name: 讨论
+    description: 论文讨论与AI反馈
+  - name: 支付
+    description: 充值订单、支付回调
+  - name: 运营
+    description: 签到、邀请奖励
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Token认证
+
+  schemas:
+    # 通用响应
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+        message:
+          type: string
+          example: "操作成功"
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "INSUFFICIENT_CREDITS"
+            message:
+              type: string
+              example: "积分不足"
+            details:
+              type: object
+
+    # 用户相关
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        credits:
+          type: integer
+          example: 100
+        is_vip:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "student@university.edu"
+        password:
+          type: string
+          format: password
+          example: "StrongPass123!"
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        phone:
+          type: string
+          example: "13800138000"
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        tokens:
+          type: object
+          properties:
+            access_token:
+              type: string
+            refresh_token:
+              type: string
+            expires_in:
+              type: integer
+              example: 604800
+
+    # 积分相关
+    CreditTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [recharge, consume, reward, refund]
+        amount:
+          type: integer
+          example: -15
+        balance_after:
+          type: integer
+          example: 285
+        description:
+          type: string
+          example: "段落润色"
+        created_at:
+          type: string
+          format: date-time
+
+    # 论文相关
+    Paper:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: "人工智能伦理研究"
+        content:
+          type: object
+          description: "Tiptap JSON格式"
+        word_count:
+          type: integer
+          example: 3500
+        tags:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreatePaperRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+        content:
+          type: object
+        tags:
+          type: array
+          items:
+            type: string
+
+    # AI服务相关
+    PolishRequest:
+      type: object
+      required:
+        - text
+        - type
+      properties:
+        text:
+          type: string
+          maxLength: 2000
+          example: "本文探讨了人工智能在教育领域的应用..."
+        type:
+          type: string
+          enum: [grammar, logic, style]
+          example: "grammar"
+
+    PolishResponse:
+      type: object
+      properties:
+        original:
+          type: string
+        polished:
+          type: string
+        changes:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              position:
+                type: array
+                items:
+                  type: integer
+              suggestion:
+                type: string
+        credits_cost:
+          type: integer
+          example: 15
+        credits_remaining:
+          type: integer
+          example: 285
+
+    GenerateOutlineRequest:
+      type: object
+      required:
+        - topic
+      properties:
+        topic:
+          type: string
+          example: "人工智能伦理"
+        paper_type:
+          type: string
+          enum: [research, review, thesis]
+          default: research
+
+    # 支付相关
+    CreateOrderRequest:
+      type: object
+      required:
+        - package
+      properties:
+        package:
+          type: string
+          enum: [basic, standard, premium]
+          example: "standard"
+
+    Order:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        amount_yuan:
+          type: number
+          format: decimal
+          example: 29.9
+        credits:
+          type: integer
+          example: 2000
+        status:
+          type: string
+          enum: [pending, paid, failed, refunded]
+        payment_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+
+    # 分页
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+
+  responses:
+    Unauthorized:
+      description: 未授权
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "UNAUTHORIZED"
+              message: "未登录或Token失效"
+
+    InsufficientCredits:
+      description: 积分不足
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "INSUFFICIENT_CREDITS"
+              message: "积分不足，请充值"
+              details:
+                required: 15
+                current: 5
+
+paths:
+  # ==================== 认证接口 ====================
+  /auth/register:
+    post:
+      tags:
+        - 认证
+      summary: 用户注册
+      description: 注册新用户，自动赠送100积分
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      tags:
+        - 认证
+      summary: 用户登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: 账号或密码错误
+
+  /auth/refresh:
+    post:
+      tags:
+        - 认证
+      summary: 刷新Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refresh_token
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  expires_in:
+                    type: integer
+
+  # ==================== 积分接口 ====================
+  /credits/balance:
+    get:
+      tags:
+        - 积分
+      summary: 查询积分余额
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          credits:
+                            type: integer
+                            example: 285
+                          is_vip:
+                            type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /credits/transactions:
+    get:
+      tags:
+        - 积分
+      summary: 积分流水记录
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CreditTransaction'
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'
+
+  # ==================== 论文接口 ====================
+  /papers:
+    get:
+      tags:
+        - 论文
+      summary: 论文列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: tag
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Paper'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+    post:
+      tags:
+        - 论文
+      summary: 创建论文
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaperRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Paper'
+
+  /papers/{id}:
+    get:
+      tags:
+        - 论文
+      summary: 获取论文详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Paper'
+
+    patch:
+      tags:
+        - 论文
+      summary: 更新论文
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                content:
+                  type: object
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: 更新成功
+
+    delete:
+      tags:
+        - 论文
+      summary: 删除论文
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+
+  # ==================== AI服务接口 ====================
+  /ai/polish:
+    post:
+      tags:
+        - AI服务
+      summary: 段落润色
+      description: |
+        消耗积分：15积分/500字
+        超过500字按比例递增
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolishRequest'
+      responses:
+        '200':
+          description: 润色成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PolishResponse'
+        '402':
+          $ref: '#/components/responses/InsufficientCredits'
+
+  /ai/generate-outline:
+    post:
+      tags:
+        - AI服务
+      summary: 生成大纲
+      description: 消耗积分：10积分/次
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateOutlineRequest'
+      responses:
+        '200':
+          description: 生成成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outline:
+                    type: object
+                  credits_cost:
+                    type: integer
+                  credits_remaining:
+                    type: integer
+
+  /ai/check-grammar:
+    post:
+      tags:
+        - AI服务
+      summary: 语法检查
+      description: 消耗积分：20积分/次
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                level:
+                  type: string
+                  enum: [basic, standard, strict]
+                  default: standard
+      responses:
+        '200':
+          description: 检查完成
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    type: array
+                    items:
+                      type: object
+
+  /ai/generate-references:
+    post:
+      tags:
+        - AI服务
+      summary: 生成参考文献
+      description: 消耗积分：10积分/次
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - topic
+              properties:
+                topic:
+                  type: string
+                count:
+                  type: integer
+                  default: 10
+                format:
+                  type: string
+                  enum: [gb7714, apa, mla]
+                  default: gb7714
+      responses:
+        '200':
+          description: 生成成功
+
+  /ai/rewrite:
+    post:
+      tags:
+        - AI服务
+      summary: 降重改写
+      description: 消耗积分：50积分/段落
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                similarity_threshold:
+                  type: number
+                  format: float
+                  default: 0.3
+      responses:
+        '200':
+          description: 改写成功
+
+  # ==================== 支付接口 ====================
+  /payment/orders:
+    post:
+      tags:
+        - 支付
+      summary: 创建充值订单
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: 订单创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Order'
+
+  /payment/orders/{orderId}:
+    get:
+      tags:
+        - 支付
+      summary: 查询订单状态
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Order'
+
+  /payment/callback/alipay:
+    post:
+      tags:
+        - 支付
+      summary: 支付宝回调
+      description: 支付宝异步通知接口
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: 返回success
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "success"
+
+  # ==================== 运营接口 ====================
+  /user/checkin:
+    post:
+      tags:
+        - 运营
+      summary: 每日签到
+      description: 每日签到获得5积分
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 签到成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credits_earned:
+                    type: integer
+                    example: 5
+                  credits_total:
+                    type: integer
+                  streak_days:
+                    type: integer
+        '409':
+          description: 今日已签到
+
+  /user/invite-code:
+    get:
+      tags:
+        - 运营
+      summary: 生成邀请码
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 生成成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                  invite_url:
+                    type: string
+                  rewards:
+                    type: object
+
+  /user/redeem-invite:
+    post:
+      tags:
+        - 运营
+      summary: 使用邀请码
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+              properties:
+                code:
+                  type: string
+      responses:
+        '200':
+          description: 兑换成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credits_earned:
+                    type: integer
+                  credits_total:
+                    type: integer

@@ -1,0 +1,183 @@
+### API测试文件（使用VSCode REST Client插件）
+
+### 变量定义
+@baseUrl = http://localhost:3000/api
+@email = test@example.com
+@password = Test123!
+
+### ========== 认证接口 ==========
+
+### 1. 用户注册
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### 保存响应中的token
+# @name register
+# 从响应中提取: @token = {{register.response.body.data.tokens.access_token}}
+
+### 2. 用户登录
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### 3. 刷新Token
+@refreshToken = eyJhbGc...
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refreshToken}}"
+}
+
+### ========== 积分接口 ==========
+
+### 4. 查询积分余额
+@token = eyJhbGc...
+GET {{baseUrl}}/credits/balance
+Authorization: Bearer {{token}}
+
+### 5. 积分流水记录（分页）
+GET {{baseUrl}}/credits/transactions?page=1&limit=20
+Authorization: Bearer {{token}}
+
+### ========== 论文接口 ==========
+
+### 6. 创建论文
+POST {{baseUrl}}/papers
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "人工智能伦理研究",
+  "content": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "heading",
+        "attrs": { "level": 1 },
+        "content": [{ "type": "text", "text": "引言" }]
+      }
+    ]
+  },
+  "tags": ["毕业论文", "AI伦理"]
+}
+
+### 7. 获取论文列表
+GET {{baseUrl}}/papers?page=1&limit=10
+Authorization: Bearer {{token}}
+
+### 8. 获取论文详情
+@paperId = uuid-here
+GET {{baseUrl}}/papers/{{paperId}}
+Authorization: Bearer {{token}}
+
+### 9. 更新论文
+PATCH {{baseUrl}}/papers/{{paperId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "人工智能伦理研究（修订版）",
+  "tags": ["毕业论文", "AI伦理", "已修改"]
+}
+
+### 10. 删除论文
+DELETE {{baseUrl}}/papers/{{paperId}}
+Authorization: Bearer {{token}}
+
+### ========== AI服务接口 ==========
+
+### 11. 段落润色
+POST {{baseUrl}}/ai/polish
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "text": "本文探讨了人工智能在教育领域的应用，通过分析现有研究，提出了一些建议。",
+  "type": "grammar"
+}
+
+### 12. 生成大纲
+POST {{baseUrl}}/ai/generate-outline
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "topic": "人工智能伦理",
+  "paper_type": "research"
+}
+
+### 13. 语法检查
+POST {{baseUrl}}/ai/check-grammar
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "text": "这是一个包含很多语法错误的文本...",
+  "level": "strict"
+}
+
+### 14. 生成参考文献
+POST {{baseUrl}}/ai/generate-references
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "topic": "深度学习",
+  "count": 10,
+  "format": "gb7714"
+}
+
+### 15. 降重改写
+POST {{baseUrl}}/ai/rewrite
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "text": "需要降重的段落内容...",
+  "similarity_threshold": 0.3
+}
+
+### ========== 支付接口 ==========
+
+### 16. 创建充值订单
+POST {{baseUrl}}/payment/orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "package": "standard"
+}
+
+### 17. 查询订单状态
+@orderId = uuid-here
+GET {{baseUrl}}/payment/orders/{{orderId}}
+Authorization: Bearer {{token}}
+
+### ========== 运营接口 ==========
+
+### 18. 每日签到
+POST {{baseUrl}}/user/checkin
+Authorization: Bearer {{token}}
+
+### 19. 生成邀请码
+GET {{baseUrl}}/user/invite-code
+Authorization: Bearer {{token}}
+
+### 20. 使用邀请码
+POST {{baseUrl}}/user/redeem-invite
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "code": "ABC123XYZ"
+}

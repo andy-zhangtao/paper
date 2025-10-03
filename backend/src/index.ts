@@ -18,7 +18,7 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 路由
+// 用户端路由
 app.use('/api/auth', authRoutes);
 import paperRoutes from './routes/paperRoutes';
 app.use('/api/papers', paperRoutes);
@@ -28,6 +28,14 @@ import aiRoutes from './routes/aiRoutes';
 app.use('/api/ai', aiRoutes);
 import userRoutes from './routes/userRoutes';
 app.use('/api/user', userRoutes);
+
+// 管理员路由
+import adminAuthRoutes from './routes/adminAuthRoutes';
+import adminUserRoutes from './routes/adminUserRoutes';
+import adminStatsRoutes from './routes/adminStatsRoutes';
+app.use('/api/admin/auth', adminAuthRoutes);
+app.use('/api/admin/users', adminUserRoutes);
+app.use('/api/admin/stats', adminStatsRoutes);
 
 // 健康检查
 app.get('/health', (req: Request, res: Response) => {

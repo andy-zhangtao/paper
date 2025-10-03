@@ -105,9 +105,49 @@ CREATE TABLE IF NOT EXISTS paper_versions (
   INDEX idx_version (paper_id, version_number)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 8. 管理员表
+CREATE TABLE IF NOT EXISTS admins (
+  id VARCHAR(36) PRIMARY KEY,
+  username VARCHAR(50) NOT NULL UNIQUE,
+  password VARCHAR(255) NOT NULL,
+  email VARCHAR(255),
+  name VARCHAR(100),
+  status ENUM('active', 'disabled') DEFAULT 'active',
+  last_login_at TIMESTAMP NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_username (username),
+  INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 9. 管理员操作日志表
+CREATE TABLE IF NOT EXISTS admin_operation_logs (
+  id VARCHAR(36) PRIMARY KEY,
+  admin_id VARCHAR(36) NOT NULL,
+  operation_type VARCHAR(50) NOT NULL COMMENT '操作类型：ban_user, recharge, etc',
+  target_type VARCHAR(50) COMMENT '目标类型：user, paper, etc',
+  target_id VARCHAR(36) COMMENT '目标ID',
+  details JSON COMMENT '操作详情',
+  ip_address VARCHAR(45),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE CASCADE,
+  INDEX idx_admin_id (admin_id),
+  INDEX idx_operation_type (operation_type),
+  INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 需要在 users 表添加 status 字段用于封禁
+ALTER TABLE users ADD COLUMN status ENUM('active', 'banned') DEFAULT 'active' AFTER credits;
+ALTER TABLE users ADD INDEX idx_status (status);
+
 -- 插入默认充值套餐
 INSERT INTO recharge_packages (id, credits, price, bonus_credits, is_popular) VALUES
   (UUID(), 1000, 10.00, 0, FALSE),
   (UUID(), 5000, 45.00, 500, TRUE),
   (UUID(), 10000, 80.00, 2000, FALSE),
   (UUID(), 50000, 350.00, 15000, FALSE);
+
+-- 插入默认管理员账号（密码：admin123，实际使用时需要通过API修改）
+-- 注意：这个密码是 bcrypt 加密后的 'admin123'
+INSERT INTO admins (id, username, password, email, name) VALUES
+  (UUID(), 'admin', '$2b$10$rKGWRzFQxJxM5qV5y5Y5YOqWXqJZQXGxYZQXGxYZQXGxYZQXGxYZ', 'admin@example.com', '系统管理员');

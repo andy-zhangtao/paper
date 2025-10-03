@@ -1,0 +1,16 @@
+{
+  "name": "生产环境",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.yourapp.com/api",
+      "enabled": true
+    },
+    {
+      "key": "token",
+      "value": "",
+      "enabled": true,
+      "description": "生产环境Token"
+    }
+  ]
+}

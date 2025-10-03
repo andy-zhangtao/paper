@@ -1,0 +1,32 @@
+{
+  "name": "本地开发环境",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api",
+      "enabled": true
+    },
+    {
+      "key": "token",
+      "value": "",
+      "enabled": true,
+      "description": "登录后自动设置"
+    },
+    {
+      "key": "proxy",
+      "value": "http://127.0.0.1:7890",
+      "enabled": true,
+      "description": "本地Clash代理"
+    },
+    {
+      "key": "testEmail",
+      "value": "test@example.com",
+      "enabled": true
+    },
+    {
+      "key": "testPassword",
+      "value": "Test123!",
+      "enabled": true
+    }
+  ]
+}

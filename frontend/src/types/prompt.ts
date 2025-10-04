@@ -32,6 +32,7 @@ export interface PaperCreationStateOutlineItem {
 export interface PaperCreationContentSection {
   heading: string
   content: string
+  sectionId?: string
 }
 
 export interface PaperCreationState {

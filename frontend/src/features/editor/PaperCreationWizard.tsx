@@ -11,11 +11,13 @@ import type {
   PromptTemplateSummary,
   PaperCreationChatMessage,
   PaperCreationState,
+  PaperCreationStateOutlineItem,
+  PaperCreationContentSection,
 } from '@/types/prompt'
 import { usePaperCreationState } from './usePaperCreationState'
 
 type CreationStage = PaperCreationStageCode
-type Step = CreationStage | 'preview'
+type Step = CreationStage | 'editor'
 type Message = PaperCreationChatMessage
 
 const CREATION_STAGES: CreationStage[] = ['idea', 'outline', 'content']
@@ -35,13 +37,13 @@ const STAGE_FALLBACK_INFO: Record<CreationStage, { title: string; description: s
   },
 }
 
-const STEP_ORDER: Step[] = ['idea', 'outline', 'content', 'preview']
+const STEP_ORDER: Step[] = ['idea', 'outline', 'content', 'editor']
 
 const STEP_TITLES: Record<Step, string> = {
   idea: '选择创意',
   outline: '生成大纲',
   content: '填充内容',
-  preview: '预览完成',
+  editor: '编辑正文',
 }
 
 const STEP_INTRO_MESSAGES: Record<Step, string> = {
@@ -51,14 +53,14 @@ const STEP_INTRO_MESSAGES: Record<Step, string> = {
     '**第二步：生成大纲**\n\n现在我将为你生成详细的论文大纲。你对大纲有什么具体要求吗？（如章节数量、重点内容等）\n\n如果没有特殊要求，请直接回复「生成大纲」。',
   content:
     '**第三步：填充内容**\n\n接下来我将为每个章节生成详细内容。你希望我：\n\n1. 自动生成所有章节内容\n2. 逐章节生成，你可以针对每章提出修改意见\n\n请告诉我你的选择，或直接回复「开始生成」。',
-  preview:
-    '**第四步：预览与导出**\n\n论文内容已生成完成！下面是完整的Markdown格式预览。你可以：\n\n- 点击「编辑」进入富文本编辑器继续修改\n- 点击「导出」保存为文档\n- 点击「重新生成」从头开始',
+  editor:
+    '**第四步：进入编辑器**\n\n已为你整理章节大纲，点击任意章节即可自动生成正文，也可以手动编辑。编辑完成后可导出Markdown。',
 }
 
 const STEP_NEXT_LABEL: Record<CreationStage, string> = {
   idea: '生成论文大纲',
   outline: '进入正文生成',
-  content: '预览论文',
+  content: '进入编辑器',
 }
 
 const STEP_RESULT_TITLES: Record<CreationStage, string> = {
@@ -327,7 +329,7 @@ export const PaperCreationWizard = () => {
     content: false,
   })
 
-  const currentStage = step === 'preview' ? null : step
+  const currentStage = step === 'editor' ? null : step
   const currentStageInfo = currentStage ? promptData[currentStage] : undefined
   const currentPromptId = currentStage ? selectedPromptIds[currentStage] : null
   const canSend = Boolean(currentStage && currentPromptId && input.trim())
@@ -650,8 +652,8 @@ export const PaperCreationWizard = () => {
       setStep('content')
       appendIntroForStep('content')
     } else if (step === 'content') {
-      setStep('preview')
-      appendIntroForStep('preview')
+      setStep('editor')
+      appendIntroForStep('editor')
     }
   }
 

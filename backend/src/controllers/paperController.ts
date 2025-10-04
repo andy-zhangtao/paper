@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
+import { execute, query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
 
 /**
@@ -26,7 +26,8 @@ export const createPaper = async (req: AuthRequest, res: Response) => {
     const now = new Date();
     const paperContent = content || { type: 'doc', content: [] };
 
-    await query(pool, 
+    await execute(
+      pool,
       `INSERT INTO papers (id, user_id, title, content, word_count, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [paperId, userId, title, JSON.stringify(paperContent), 0, now, now]
@@ -66,29 +67,37 @@ export const getPapers = async (req: AuthRequest, res: Response) => {
     const offset = (page - 1) * limit;
 
     // 构建查询条件
-    let query = 'SELECT id, title, word_count, tags, updated_at FROM papers WHERE user_id = ?';
+    let sql = 'SELECT id, title, word_count, tags, updated_at FROM papers WHERE user_id = ?';
     const params: any[] = [userId];
 
     if (tag) {
-      query += ' AND JSON_CONTAINS(tags, ?)';
+      sql += ' AND JSON_CONTAINS(tags, ?)';
       params.push(JSON.stringify(tag));
     }
 
-    query += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?';
+    sql += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
 
-    const [papers] = await query(pool, query, params);
+    const [papers] = await query(
+      pool,
+      sql,
+      params
+    );
 
     // 获取总数
-    let countQuery = 'SELECT COUNT(*) as total FROM papers WHERE user_id = ?';
+    let countSql = 'SELECT COUNT(*) as total FROM papers WHERE user_id = ?';
     const countParams: any[] = [userId];
     if (tag) {
-      countQuery += ' AND JSON_CONTAINS(tags, ?)';
+      countSql += ' AND JSON_CONTAINS(tags, ?)';
       countParams.push(JSON.stringify(tag));
     }
 
-    const [countResult] = await query(pool, countQuery, countParams);
-    const total = (countResult as any)[0].total;
+    const [countResult] = await query<{ total: number }>(
+      pool,
+      countSql,
+      countParams
+    );
+    const total = countResult[0]?.total ?? 0;
 
     return res.status(200).json({
       success: true,
@@ -121,12 +130,21 @@ export const getPaper = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const userId = req.userId;
 
-    const [papers] = await query(pool, 
+    const [papers] = await query<{
+      id: string;
+      title: string;
+      content: string;
+      word_count: number;
+      tags: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }>(
+      pool,
       'SELECT id, title, content, word_count, tags, created_at, updated_at FROM papers WHERE id = ? AND user_id = ?',
       [id, userId]
     );
 
-    if (!Array.isArray(papers) || papers.length === 0) {
+    if (papers.length === 0) {
       return res.status(404).json({
         success: false,
         error: {
@@ -136,7 +154,7 @@ export const getPaper = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const paper = papers[0] as any;
+    const paper = papers[0];
 
     return res.status(200).json({
       success: true,
@@ -172,12 +190,13 @@ export const updatePaper = async (req: AuthRequest, res: Response) => {
     const { title, content, tags } = req.body;
 
     // 检查论文是否存在
-    const [papers] = await query(pool, 
+    const [papers] = await query<{ id: string }>(
+      pool,
       'SELECT id FROM papers WHERE id = ? AND user_id = ?',
       [id, userId]
     );
 
-    if (!Array.isArray(papers) || papers.length === 0) {
+    if (papers.length === 0) {
       return res.status(404).json({
         success: false,
         error: {
@@ -216,7 +235,8 @@ export const updatePaper = async (req: AuthRequest, res: Response) => {
 
     params.push(id, userId);
 
-    await query(pool, 
+    await execute(
+      pool,
       `UPDATE papers SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`,
       params
     );
@@ -249,12 +269,13 @@ export const deletePaper = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const userId = req.userId;
 
-    const [result] = await query(pool, 
+    const result = await execute(
+      pool,
       'DELETE FROM papers WHERE id = ? AND user_id = ?',
       [id, userId]
-    ) as any;
+    );
 
-    if (result.affectedRows === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
         error: {

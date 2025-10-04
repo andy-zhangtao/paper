@@ -3,7 +3,7 @@
  * 将MySQL风格的查询转换为PostgreSQL风格
  */
 
-import { Pool, PoolClient, QueryResult } from 'pg';
+import { FieldDef, Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 /**
  * 将MySQL占位符(?)转换为PostgreSQL占位符($1, $2, $3...)
@@ -19,13 +19,13 @@ function convertPlaceholders(sql: string): string {
 /**
  * 执行查询(兼容MySQL返回格式)
  */
-export async function query(
+export async function query<T extends QueryResultRow = Record<string, unknown>>(
   pool: Pool | PoolClient,
   sql: string,
   params: any[] = []
-): Promise<[any[], any]> {
+): Promise<[T[], FieldDef[]]> {
   const pgSql = convertPlaceholders(sql);
-  const result: QueryResult = await pool.query(pgSql, params);
+  const result: QueryResult<T> = await pool.query<T>(pgSql, params);
 
   // 返回格式兼容MySQL: [rows, fields]
   return [result.rows, result.fields];
@@ -34,13 +34,13 @@ export async function query(
 /**
  * 执行查询(PostgreSQL原生格式)
  */
-export async function execute(
+export async function execute<T extends QueryResultRow = Record<string, unknown>>(
   pool: Pool | PoolClient,
   sql: string,
   params: any[] = []
-): Promise<QueryResult> {
+): Promise<QueryResult<T>> {
   const pgSql = convertPlaceholders(sql);
-  return await pool.query(pgSql, params);
+  return await pool.query<T>(pgSql, params);
 }
 
 /**

@@ -1,14 +1,38 @@
 import { Response } from 'express';
 import pool from '../config/database';
 import { query } from '../utils/pgQuery';
-import { RowDataPacket } from 'mysql2';
 import { AdminRequest } from '../middleware/adminAuth';
 
 // 获取系统概览统计
 export const getSystemOverview = async (req: AdminRequest, res: Response) => {
   try {
+    type UserOverviewRow = {
+      total_users: number | null;
+      active_users: number | null;
+      banned_users: number | null;
+      today_new_users: number | null;
+    };
+    type PaperOverviewRow = {
+      total_papers: number | null;
+      today_new_papers: number | null;
+      total_words: number | null;
+    };
+    type CreditOverviewRow = {
+      total_recharge: number | null;
+      total_consume: number | null;
+      today_recharge: number | null;
+      today_consume: number | null;
+    };
+    type RevenueOverviewRow = {
+      total_revenue: number | null;
+      today_revenue: number | null;
+      total_orders: number | null;
+      success_orders: number | null;
+    };
+
     // 用户统计
-    const [userStats] = await pool.query<RowDataPacket[]>(
+    const [userStats] = await query<UserOverviewRow>(
+      pool,
       `SELECT
         COUNT(*) as total_users,
         COUNT(CASE WHEN status = 'active' THEN 1 END) as active_users,
@@ -18,7 +42,8 @@ export const getSystemOverview = async (req: AdminRequest, res: Response) => {
     );
 
     // 论文统计
-    const [paperStats] = await pool.query<RowDataPacket[]>(
+    const [paperStats] = await query<PaperOverviewRow>(
+      pool,
       `SELECT
         COUNT(*) as total_papers,
         COUNT(CASE WHEN created_at::date = CURRENT_DATE THEN 1 END) as today_new_papers,
@@ -27,7 +52,8 @@ export const getSystemOverview = async (req: AdminRequest, res: Response) => {
     );
 
     // 积分统计
-    const [creditStats] = await pool.query<RowDataPacket[]>(
+    const [creditStats] = await query<CreditOverviewRow>(
+      pool,
       `SELECT
         SUM(CASE WHEN type = 'recharge' THEN amount ELSE 0 END) as total_recharge,
         SUM(CASE WHEN type = 'consume' THEN amount ELSE 0 END) as total_consume,
@@ -37,7 +63,8 @@ export const getSystemOverview = async (req: AdminRequest, res: Response) => {
     );
 
     // 收入统计（假设1000积分=10元）
-    const [revenueStats] = await pool.query<RowDataPacket[]>(
+    const [revenueStats] = await query<RevenueOverviewRow>(
+      pool,
       `SELECT
         SUM(amount) as total_revenue,
         SUM(CASE WHEN created_at::date = CURRENT_DATE THEN amount ELSE 0 END) as today_revenue,
@@ -47,14 +74,16 @@ export const getSystemOverview = async (req: AdminRequest, res: Response) => {
       WHERE status = 'success'`
     );
 
+    const revenue = revenueStats[0];
+
     res.json({
       users: userStats[0],
       papers: paperStats[0],
       credits: creditStats[0],
       revenue: {
-        ...revenueStats[0],
-        total_revenue: Number(revenueStats[0]?.total_revenue || 0),
-        today_revenue: Number(revenueStats[0]?.today_revenue || 0)
+        ...revenue,
+        total_revenue: Number(revenue?.total_revenue || 0),
+        today_revenue: Number(revenue?.today_revenue || 0)
       }
     });
   } catch (error) {
@@ -68,7 +97,12 @@ export const getUserGrowthTrend = async (req: AdminRequest, res: Response) => {
   try {
     const { days = 30 } = req.query;
 
-    const [trend] = await pool.query<RowDataPacket[]>(
+    const [trend] = await query<{
+      date: string;
+      new_users: number | null;
+      cumulative_users: number | string | null;
+    }>(
+      pool,
       `SELECT
         created_at::date as date,
         COUNT(*) as new_users,
@@ -92,7 +126,12 @@ export const getRevenueTrend = async (req: AdminRequest, res: Response) => {
   try {
     const { days = 30 } = req.query;
 
-    const [trend] = await pool.query<RowDataPacket[]>(
+    const [trend] = await query<{
+      date: string;
+      daily_revenue: number | null;
+      daily_orders: number | null;
+    }>(
+      pool,
       `SELECT
         created_at::date as date,
         SUM(amount) as daily_revenue,
@@ -118,7 +157,13 @@ export const getCreditConsumptionStats = async (req: AdminRequest, res: Response
     const { days = 30 } = req.query;
 
     // 按服务类型统计消费
-    const [serviceStats] = await pool.query<RowDataPacket[]>(
+    const [serviceStats] = await query<{
+      service_type: string;
+      usage_count: number | null;
+      total_credits: number | null;
+      avg_credits: number | null;
+    }>(
+      pool,
       `SELECT
         service_type,
         COUNT(*) as usage_count,
@@ -132,7 +177,12 @@ export const getCreditConsumptionStats = async (req: AdminRequest, res: Response
     );
 
     // 按日期统计消费
-    const [dailyStats] = await pool.query<RowDataPacket[]>(
+    const [dailyStats] = await query<{
+      date: string;
+      usage_count: number | null;
+      total_credits: number | null;
+    }>(
+      pool,
       `SELECT
         created_at::date as date,
         COUNT(*) as usage_count,
@@ -174,7 +224,16 @@ export const getTopUsers = async (req: AdminRequest, res: Response) => {
         orderByClause = 'total_consumption DESC';
     }
 
-    const [users] = await pool.query<RowDataPacket[]>(
+    const [users] = await query<{
+      id: string;
+      email: string;
+      credits: number;
+      status: string;
+      total_papers: number | null;
+      total_consumption: number | null;
+      total_recharge: number | null;
+    }>(
+      pool,
       `SELECT
         u.id,
         u.email,
@@ -204,7 +263,14 @@ export const getPackageSalesStats = async (req: AdminRequest, res: Response) => 
   try {
     const { days = 30 } = req.query;
 
-    const [stats] = await pool.query<RowDataPacket[]>(
+    const [stats] = await query<{
+      package_id: string;
+      credits: number;
+      price: number;
+      sales_count: number | null;
+      total_revenue: number | null;
+    }>(
+      pool,
       `SELECT
         rp.id as package_id,
         rp.credits,
@@ -232,7 +298,13 @@ export const getPackageSalesStats = async (req: AdminRequest, res: Response) => 
 export const getRealtimeData = async (req: AdminRequest, res: Response) => {
   try {
     // 最近1小时的数据
-    const [realtimeStats] = await pool.query<RowDataPacket[]>(
+    const [realtimeStats] = await query<{
+      new_users_1h: number | null;
+      new_papers_1h: number | null;
+      revenue_1h: number | null;
+      consumption_1h: number | null;
+    }>(
+      pool,
       `SELECT
         (SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour') as new_users_1h,
         (SELECT COUNT(*) FROM papers WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour') as new_papers_1h,
@@ -242,7 +314,12 @@ export const getRealtimeData = async (req: AdminRequest, res: Response) => {
     );
 
     // 最近活跃用户
-    const [activeUsers] = await pool.query<RowDataPacket[]>(
+    const [activeUsers] = await query<{
+      id: string;
+      email: string;
+      last_activity: Date;
+    }>(
+      pool,
       `SELECT DISTINCT
         u.id,
         u.email,

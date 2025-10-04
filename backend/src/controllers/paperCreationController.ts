@@ -30,6 +30,133 @@ interface ChatHistoryItem {
   content: string
 }
 
+class HttpError extends Error {
+  status: number
+  body: any
+
+  constructor(status: number, body: any) {
+    super(typeof body === 'object' ? body?.error?.message ?? '请求错误' : String(body))
+    this.status = status
+    this.body = body
+  }
+}
+
+interface PreparedChatContext {
+  stage: PaperCreationStageCode
+  messages: aiService.ChatMessage[]
+  stateSnapshot?: aiService.PaperCreationState
+}
+
+async function prepareChatContext(req: AuthRequest): Promise<PreparedChatContext> {
+  const userId = req.userId
+  if (!userId) {
+    throw new HttpError(401, {
+      success: false,
+      error: {
+        code: 'UNAUTHORIZED',
+        message: '未授权',
+      },
+    })
+  }
+
+  const { stage, promptId, message, history, stateSnapshot } = req.body as {
+    stage?: string
+    promptId?: string
+    message?: string
+    history?: ChatHistoryItem[]
+    stateSnapshot?: aiService.PaperCreationState
+  }
+
+  if (!stage || !isValidPaperCreationStage(stage)) {
+    throw new HttpError(400, {
+      success: false,
+      error: {
+        code: 'INVALID_STAGE',
+        message: '提示词阶段无效',
+      },
+    })
+  }
+
+  if (!promptId || typeof promptId !== 'string') {
+    throw new HttpError(400, {
+      success: false,
+      error: {
+        code: 'INVALID_PROMPT',
+        message: '提示词ID无效',
+      },
+    })
+  }
+
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    throw new HttpError(400, {
+      success: false,
+      error: {
+        code: 'INVALID_MESSAGE',
+        message: '消息内容不能为空',
+      },
+    })
+  }
+
+  const [promptRows] = await query<PromptTemplateRow & { prompt_stage_code: string }>(
+    pool,
+    `SELECT pt.id, pt.scope, pt.title, pt.content, pt.owner_user_id, pt.created_at, ps.code as prompt_stage_code
+       FROM prompt_templates pt
+       JOIN prompt_stages ps ON pt.stage_id = ps.id
+       WHERE pt.id = ?
+         AND ps.code = ?
+         AND pt.is_active = TRUE
+         AND (
+           pt.scope = 'system'
+           OR (pt.scope = 'user' AND pt.owner_user_id = ?)
+         )
+       LIMIT 1`,
+    [promptId, stage, userId]
+  )
+
+  if (!promptRows.length) {
+    throw new HttpError(404, {
+      success: false,
+      error: {
+        code: 'PROMPT_NOT_FOUND',
+        message: '提示词不存在或无权访问',
+      },
+    })
+  }
+
+  const prompt = promptRows[0]
+
+  const safeHistory: ChatHistoryItem[] = Array.isArray(history)
+    ? history
+        .filter((item): item is ChatHistoryItem => {
+          return !!item && typeof item.content === 'string' && (item.role === 'user' || item.role === 'assistant')
+        })
+        .map((item) => ({
+          role: item.role,
+          content: item.content,
+        }))
+    : []
+
+  const messages: aiService.ChatMessage[] = [
+    { role: 'system', content: prompt.content },
+    ...safeHistory.map((item) => ({
+      role: item.role,
+      content: item.content,
+    })),
+    { role: 'user', content: message.trim() },
+  ]
+
+  const snapshot =
+    stateSnapshot && typeof stateSnapshot === 'object'
+      ? (stateSnapshot as aiService.PaperCreationState)
+      : undefined
+
+  return {
+    stage: stage as PaperCreationStageCode,
+    messages,
+    stateSnapshot: snapshot,
+  }
+}
+
 export const listStagePrompts = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId
@@ -142,104 +269,8 @@ export const listStagePrompts = async (req: AuthRequest, res: Response) => {
 
 export const chatWithPrompt = async (req: AuthRequest, res: Response) => {
   try {
-    const userId = req.userId
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: '未授权',
-        },
-      })
-    }
-
-    const { stage, promptId, message, history, stateSnapshot } = req.body as {
-      stage?: string
-      promptId?: string
-      message?: string
-      history?: ChatHistoryItem[]
-      stateSnapshot?: aiService.PaperCreationState
-    }
-
-    if (!stage || !isValidPaperCreationStage(stage)) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_STAGE',
-          message: '提示词阶段无效',
-        },
-      })
-    }
-
-    if (!promptId || typeof promptId !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_PROMPT',
-          message: '提示词ID无效',
-        },
-      })
-    }
-
-    if (!message || typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_MESSAGE',
-          message: '消息内容不能为空',
-        },
-      })
-    }
-
-    const [promptRows] = await query<PromptTemplateRow & { prompt_stage_code: string }>(
-      pool,
-      `SELECT pt.id, pt.scope, pt.title, pt.content, pt.owner_user_id, pt.created_at, ps.code as prompt_stage_code
-       FROM prompt_templates pt
-       JOIN prompt_stages ps ON pt.stage_id = ps.id
-       WHERE pt.id = ?
-         AND ps.code = ?
-         AND pt.is_active = TRUE
-         AND (
-           pt.scope = 'system'
-           OR (pt.scope = 'user' AND pt.owner_user_id = ?)
-         )
-       LIMIT 1`,
-      [promptId, stage, userId]
-    )
-
-    if (!promptRows.length) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'PROMPT_NOT_FOUND',
-          message: '提示词不存在或无权访问',
-        },
-      })
-    }
-
-    const prompt = promptRows[0]
-
-    const safeHistory: ChatHistoryItem[] = Array.isArray(history)
-      ? history
-          .filter((item): item is ChatHistoryItem => {
-            return !!item && typeof item.content === 'string' && (item.role === 'user' || item.role === 'assistant')
-          })
-          .map((item) => ({
-            role: item.role,
-            content: item.content,
-          }))
-      : []
-
-    const messages = [
-      { role: 'system' as const, content: prompt.content },
-      ...safeHistory.map((item) => ({
-        role: item.role,
-        content: item.content,
-      })),
-      { role: 'user' as const, content: message.trim() },
-    ]
-
-    const aiResponse = await aiService.chatCompletion(messages, undefined, stateSnapshot)
+    const context = await prepareChatContext(req)
+    const aiResponse = await aiService.chatCompletion(context.messages, undefined, context.stateSnapshot)
 
     return res.json({
       success: true,
@@ -249,6 +280,85 @@ export const chatWithPrompt = async (req: AuthRequest, res: Response) => {
       },
     })
   } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json(error.body)
+    }
+    console.error('论文创建对话失败:', error)
+    return res.status(503).json({
+      success: false,
+      error: {
+        code: 'AI_SERVICE_ERROR',
+        message: 'AI服务暂时不可用',
+      },
+    })
+  }
+}
+
+export const chatWithPromptStream = async (req: AuthRequest, res: Response) => {
+  try {
+    const context = await prepareChatContext(req)
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('Connection', 'keep-alive')
+    if (typeof (res as any).flushHeaders === 'function') {
+      ;(res as any).flushHeaders()
+    } else {
+      res.write('\n')
+    }
+
+    const sendEvent = (event: string, data: any) => {
+      res.write(`event: ${event}\n`)
+      res.write(`data: ${JSON.stringify(data)}\n\n`)
+    }
+
+    const abortController = new AbortController()
+    const abortSignal = abortController.signal
+
+    req.on('close', () => {
+      abortController.abort()
+    })
+
+    let endSent = false
+
+    try {
+      await aiService.chatCompletionStream(
+        context.messages,
+        undefined,
+        context.stateSnapshot,
+        {
+          onChunk: (chunk) => {
+            if (chunk) {
+              sendEvent('delta', { content: chunk })
+            }
+          },
+          onComplete: (result) => {
+            sendEvent('complete', result)
+          },
+        },
+        abortSignal,
+      )
+      sendEvent('end', {})
+      endSent = true
+    } catch (error: any) {
+      if (abortSignal.aborted || error?.message === '请求已被取消') {
+        // 客户端断开连接，无需返回错误
+      } else {
+        console.error('论文创建流式对话失败:', error)
+        sendEvent('error', {
+          message: 'AI服务暂时不可用',
+        })
+      }
+    } finally {
+      if (!endSent) {
+        sendEvent('end', {})
+      }
+      res.end()
+    }
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json(error.body)
+    }
     console.error('论文创建对话失败:', error)
     return res.status(503).json({
       success: false,

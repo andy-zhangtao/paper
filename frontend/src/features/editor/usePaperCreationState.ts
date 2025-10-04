@@ -51,6 +51,16 @@ export function usePaperCreationState() {
         ...next,
         updatedAt: next.updatedAt || new Date().toISOString(),
       }
+
+      if (next.contentApproved === false) {
+        updated.contentApproved = false
+        updated.contentSections = next.contentSections ?? []
+      }
+
+      if (Array.isArray(next.contentSections)) {
+        updated.contentSections = next.contentSections
+      }
+
       writeStateToStorage(updated)
       return updated
     })

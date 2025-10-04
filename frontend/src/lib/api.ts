@@ -204,30 +204,177 @@ export const paperCreationApi = {
     return result
   },
 
-  async chat(data: PaperCreationChatRequest): Promise<PaperCreationChatResponse> {
+  async chatStream(
+    data: PaperCreationChatRequest,
+    options: {
+      signal?: AbortSignal
+      onDelta?: (chunk: string) => void
+    } = {},
+  ): Promise<PaperCreationChatResponse> {
     if (USE_MOCK) {
-      return mockPaperCreationChat(data)
+      const mockResult = await mockPaperCreationChat(data)
+      if (options.onDelta) {
+        options.onDelta(mockResult.reply)
+      }
+      return mockResult
     }
 
-    const result = await api.post('/paper-creation/chat', data)
+    const baseURL = api.defaults.baseURL || ''
+    const normalizedBase = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL
+    const endpoint = `${normalizedBase}/paper-creation/chat/stream`
 
-    if (result && typeof result === 'object' && 'success' in result) {
-      const typedResult = result as {
-        success: boolean
-        data?: PaperCreationChatResponse
-        error?: { message?: string }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    }
+
+    const token = localStorage.getItem('token')
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+      signal: options.signal,
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(text || 'AI服务调用失败')
+    }
+
+    if (!response.body) {
+      throw new Error('浏览器不支持流式响应')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    let finalResult: PaperCreationChatResponse | null = null
+    let streamError: Error | null = null
+    let ended = false
+
+    const processEvent = (rawEvent: string) => {
+      const trimmed = rawEvent.trim()
+      if (!trimmed) return
+
+      const lines = trimmed.split('\n')
+      let eventType = 'message'
+      let dataPayload = ''
+
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          eventType = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          dataPayload += line.slice(5).trim()
+        }
       }
 
-      if (!typedResult.success) {
-        const message = typedResult.error?.message || '对话生成失败'
-        throw new Error(message)
+      if (!dataPayload) {
+        return
       }
 
-      if (!typedResult.data) {
-        throw new Error('对话结果为空')
+      if (eventType === 'delta') {
+        try {
+          const payload = JSON.parse(dataPayload) as { content?: string }
+          if (payload.content && options.onDelta) {
+            options.onDelta(payload.content)
+          }
+        } catch (error) {
+          console.warn('解析delta事件失败:', error)
+        }
+        return
       }
 
-      return typedResult.data
+      if (eventType === 'complete') {
+        try {
+          finalResult = JSON.parse(dataPayload) as PaperCreationChatResponse
+        } catch (error) {
+          streamError = new Error('解析AI响应失败')
+        }
+        return
+      }
+
+      if (eventType === 'error') {
+        try {
+          const payload = JSON.parse(dataPayload) as { message?: string }
+          streamError = new Error(payload?.message || 'AI服务暂时不可用')
+        } catch (error) {
+          streamError = new Error('AI服务暂时不可用')
+        }
+        return
+      }
+
+      if (eventType === 'end') {
+        ended = true
+      }
+    }
+
+    const processBuffer = (isFinal = false) => {
+      let normalized = buffer.replace(/\r/g, '')
+      let boundary = normalized.indexOf('\n\n')
+
+      while (boundary !== -1) {
+        const rawEvent = normalized.slice(0, boundary)
+        buffer = normalized.slice(boundary + 2)
+        processEvent(rawEvent)
+        normalized = buffer
+        boundary = normalized.indexOf('\n\n')
+      }
+
+      if (isFinal && buffer.trim()) {
+        processEvent(buffer)
+        buffer = ''
+      }
+    }
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) {
+          break
+        }
+        buffer += decoder.decode(value, { stream: true })
+        processBuffer()
+
+        if (ended) {
+          await reader.cancel()
+          break
+        }
+      }
+      buffer += decoder.decode()
+      processBuffer(true)
+    } finally {
+      reader.releaseLock()
+    }
+
+    if (streamError) {
+      throw streamError
+    }
+
+    if (!finalResult) {
+      throw new Error('AI服务返回数据不完整')
+    }
+
+    return finalResult
+  },
+
+  async chat(data: PaperCreationChatRequest): Promise<PaperCreationChatResponse> {
+    let combined = ''
+    const result = await paperCreationApi.chatStream(data, {
+      onDelta: (chunk) => {
+        combined += chunk
+      },
+    })
+
+    if (!result.reply && combined) {
+      return {
+        ...result,
+        reply: combined.trim(),
+      }
     }
 
     return result

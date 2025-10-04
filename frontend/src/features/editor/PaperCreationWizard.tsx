@@ -110,6 +110,7 @@ const StatusCard = ({ state, onReset, currentStage }: StatusCardProps) => {
   const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     const cardEl = cardRef.current
     if (!cardEl) return
+    event.preventDefault()
     const rect = cardEl.getBoundingClientRect()
     dragOffsetRef.current = {
       x: event.clientX - rect.left,
@@ -288,6 +289,8 @@ interface StagePromptInfo {
 
 export const PaperCreationWizard = () => {
   const { state: paperState, updateState, resetState } = usePaperCreationState()
+  const assistantMessageIndexRef = useRef<number | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const [step, setStep] = useState<Step>('idea')
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -345,6 +348,14 @@ export const PaperCreationWizard = () => {
     : false
 
   useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     const fetchPrompts = async () => {
       setIsLoadingPrompts(true)
       setPromptError(null)
@@ -395,7 +406,12 @@ export const PaperCreationWizard = () => {
   }, [])
 
   const handleSend = async () => {
-    if (!canSend || !currentStage || !currentPromptId) return
+    if (isLoading || !canSend || !currentStage || !currentPromptId) return
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
 
     const stageForRequest = currentStage
     const promptForRequest = currentPromptId
@@ -403,21 +419,63 @@ export const PaperCreationWizard = () => {
     const userMessage: Message = { role: 'user', content: trimmedInput }
     const history = messages.map((item) => ({ role: item.role, content: item.content }))
 
-    setMessages((prev) => [...prev, userMessage])
+    setMessages((prev) => {
+      const next = [...prev, userMessage, { role: 'assistant', content: '' }]
+      assistantMessageIndexRef.current = next.length - 1
+      return next
+    })
+
     setInput('')
     setIsLoading(true)
 
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
     try {
-      const response = await paperCreationApi.chat({
-        stage: stageForRequest,
-        promptId: promptForRequest,
-        message: trimmedInput,
-        history,
-        stateSnapshot: paperState ?? undefined,
-      })
+      const response = await paperCreationApi.chatStream(
+        {
+          stage: stageForRequest,
+          promptId: promptForRequest,
+          message: trimmedInput,
+          history,
+          stateSnapshot: paperState ?? undefined,
+        },
+        {
+          signal: controller.signal,
+          onDelta: (chunk) => {
+            if (!chunk) return
+            const index = assistantMessageIndexRef.current
+            if (index === null) return
+            setMessages((prev) => {
+              const next = [...prev]
+              const currentMessage = next[index]
+              if (currentMessage) {
+                next[index] = {
+                  ...currentMessage,
+                  content: (currentMessage.content || '') + chunk,
+                }
+              }
+              return next
+            })
+          },
+        },
+      )
 
       const reply = response.reply
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
+      const index = assistantMessageIndexRef.current
+      if (index !== null) {
+        setMessages((prev) => {
+          const next = [...prev]
+          const currentMessage = next[index]
+          if (currentMessage) {
+            next[index] = {
+              ...currentMessage,
+              content: reply || currentMessage.content,
+            }
+          }
+          return next
+        })
+      }
 
       if (response.state && Object.keys(response.state).length > 0) {
         updateState(response.state)
@@ -431,15 +489,34 @@ export const PaperCreationWizard = () => {
         setGeneratedContent(reply)
       }
     } catch (error) {
+      if (error instanceof Error && error.message === '请求已被取消') {
+        return
+      }
+      const index = assistantMessageIndexRef.current
       const errorMessage = error instanceof Error ? error.message : 'AI服务暂时不可用，请稍后再试。'
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `抱歉，生成失败：${errorMessage}`,
-        },
-      ])
+      setMessages((prev) => {
+        if (index !== null && prev[index]?.role === 'assistant') {
+          const next = [...prev]
+          next[index] = {
+            role: 'assistant',
+            content: `抱歉，生成失败：${errorMessage}`,
+          }
+          return next
+        }
+
+        return [
+          ...prev,
+          {
+            role: 'assistant',
+            content: `抱歉，生成失败：${errorMessage}`,
+          },
+        ]
+      })
     } finally {
+      assistantMessageIndexRef.current = null
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null
+      }
       setIsLoading(false)
     }
   }

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { Readable } from 'stream';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { AI_MODELS, AI_PARAMS, OPENROUTER_CONFIG } from '../config/constants';
 
@@ -15,6 +16,39 @@ const aiClient = axios.create({
 });
 
 const DEFAULT_MODEL = OPENROUTER_CONFIG.modelName || AI_MODELS.default;
+
+const PAPER_CREATION_ASSISTANT_PROMPT =
+  '你是Paper AI论文写作助手。请在帮助用户的同时，根据对话判断核心信息，并按以下格式回应：\n' +
+  '1. 先输出自然语言回答。\n' +
+  '2. 紧接着输出一个以<STATE>开始、</STATE>结束的JSON。JSON字段要求：\n' +
+  '- topic: string|null，无法确认请为null。\n' +
+  '- outline: 数组(可为空)，元素包含heading与可选summary，用于概述章节结构。\n' +
+  '- confidence: 0-1之间数字，表示你对topic/outline判断的信心。\n' +
+  '- stage: idea|outline|content (可选)，表明你认为用户所处阶段。\n' +
+  '- contentApproved: boolean，当你判断用户对生成的正文内容满意且准备进入预览时为true。\n' +
+  '- contentSections: 当contentApproved为true时必须提供的数组，每个元素包含heading(章节标题)与content(对应的Markdown正文)。\n' +
+  '示例：\n回答内容...\n<STATE>{"topic":"论文主题","outline":[{"heading":"章节"}],"contentApproved":false,"contentSections":[]}</STATE>';
+
+function buildPaperCreationMessages(
+  messages: ChatMessage[],
+  stateSnapshot?: PaperCreationState,
+): ChatMessage[] {
+  const systemMessages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: PAPER_CREATION_ASSISTANT_PROMPT,
+    },
+  ];
+
+  if (stateSnapshot) {
+    systemMessages.push({
+      role: 'system',
+      content: `当前已知的论文状态(JSON)：${JSON.stringify(stateSnapshot)}`,
+    });
+  }
+
+  return [...systemMessages, ...messages];
+}
 
 // 如果配置了代理，使用代理
 if (OPENROUTER_CONFIG.proxyUrl) {
@@ -318,6 +352,154 @@ export interface PaperCreationChatResult {
   state?: PaperCreationState
 }
 
+export interface PaperCreationStreamCallbacks {
+  onChunk?: (chunk: string) => void
+  onComplete?: (result: PaperCreationChatResult) => void
+}
+
+export async function chatCompletionStream(
+  messages: ChatMessage[],
+  model: string = DEFAULT_MODEL,
+  stateSnapshot: PaperCreationState | undefined,
+  callbacks: PaperCreationStreamCallbacks,
+  signal?: AbortSignal,
+): Promise<PaperCreationChatResult> {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error('messages不能为空');
+  }
+
+  const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
+
+  const requestBody = {
+    model,
+    messages: enhancedMessages,
+    temperature: AI_PARAMS.temperature,
+    max_tokens: AI_PARAMS.maxTokens,
+    stream: true,
+  }
+
+  const response = await aiClient.post('/chat/completions', requestBody, {
+    responseType: 'stream',
+    signal,
+  })
+
+  const stream: Readable = response.data
+
+  let buffer = ''
+  let fullText = ''
+  let emittedLength = 0
+
+  const emitLatestVisibleText = () => {
+    const stateIndex = fullText.indexOf('<STATE>')
+    const visibleEnd = stateIndex === -1 ? fullText.length : stateIndex
+    if (visibleEnd > emittedLength) {
+      const chunk = fullText.slice(emittedLength, visibleEnd)
+      if (chunk && callbacks.onChunk) {
+        callbacks.onChunk(chunk)
+      }
+      emittedLength = visibleEnd
+    }
+  }
+
+  const processEvent = (rawEvent: string) => {
+    const trimmed = rawEvent.trim()
+    if (!trimmed) return
+
+    const lines = trimmed.split('\n')
+    let dataLine = ''
+    for (const line of lines) {
+      if (line.startsWith('data:')) {
+        dataLine += line.slice(5).trim()
+      }
+    }
+
+    if (!dataLine) {
+      return
+    }
+
+    if (dataLine === '[DONE]') {
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(dataLine)
+      const delta = parsed.choices?.[0]?.delta ?? {}
+      const content: string = delta.content ?? ''
+      if (content) {
+        fullText += content.replace(/\r/g, '')
+        emitLatestVisibleText()
+      }
+    } catch (error) {
+      console.warn('解析OpenRouter流数据失败:', error)
+    }
+  }
+
+  const result = await new Promise<PaperCreationChatResult>((resolve, reject) => {
+    const handleError = (error: Error) => {
+      stream.destroy()
+      reject(error)
+    }
+
+    if (signal) {
+      signal.addEventListener(
+        'abort',
+        () => {
+          handleError(new Error('请求已被取消'))
+        },
+        { once: true },
+      )
+    }
+
+    stream.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf-8')
+
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary !== -1) {
+        const rawEvent = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        processEvent(rawEvent)
+        boundary = buffer.indexOf('\n\n')
+      }
+    })
+
+    stream.on('error', handleError)
+
+    stream.on('end', () => {
+      if (buffer.trim()) {
+        processEvent(buffer)
+      }
+
+      const stateMatch = fullText.match(/<STATE>([\s\S]*?)<\/STATE>/)
+      let parsedState: PaperCreationState | undefined
+      if (stateMatch) {
+        try {
+          parsedState = {
+            ...JSON.parse(stateMatch[1]),
+            updatedAt: new Date().toISOString(),
+          }
+        } catch (error) {
+          console.warn('解析PaperCreation状态失败:', error)
+        }
+      }
+
+      const cleanReply = fullText.replace(/<STATE>[\s\S]*?<\/STATE>/, '').trim()
+      const result: PaperCreationChatResult = {
+        reply: cleanReply,
+        state: parsedState,
+      }
+
+      emittedLength = cleanReply.length
+
+      if (callbacks.onComplete) {
+        callbacks.onComplete(result)
+      }
+
+      resolve(result)
+    })
+  })
+
+  return result
+}
 export async function chatCompletion(
   messages: ChatMessage[],
   model: string = DEFAULT_MODEL,
@@ -327,33 +509,7 @@ export async function chatCompletion(
     throw new Error('messages不能为空');
   }
 
-  const assistantInstructions =
-    '你是Paper AI论文写作助手。请在帮助用户的同时，根据对话判断核心信息，并按以下格式回应：\n' +
-    '1. 先输出自然语言回答。\n' +
-    '2. 紧接着输出一个以<STATE>开始、</STATE>结束的JSON。JSON字段要求：\n' +
-    '- topic: string|null，无法确认请为null。\n' +
-    '- outline: 数组(可为空)，元素包含heading与可选summary，用于概述章节结构。\n' +
-    '- confidence: 0-1之间数字，表示你对topic/outline判断的信心。\n' +
-    '- stage: idea|outline|content (可选)，表明你认为用户所处阶段。\n' +
-    '- contentApproved: boolean，当你判断用户对生成的正文内容满意且准备进入预览时为true。\n' +
-    '- contentSections: 当contentApproved为true时必须提供的数组，每个元素包含heading(章节标题)与content(对应的Markdown正文)。\n' +
-    '示例：\n回答内容...\n<STATE>{"topic":"论文主题","outline":[{"heading":"章节"}],"contentApproved":false,"contentSections":[]}</STATE>'
-
-  const enhancedMessages: ChatMessage[] = [
-    {
-      role: 'system',
-      content: assistantInstructions,
-    },
-    ...(stateSnapshot
-      ? [
-          {
-            role: 'system' as const,
-            content: `当前已知的论文状态(JSON)：${JSON.stringify(stateSnapshot)}`,
-          },
-        ]
-      : []),
-    ...messages,
-  ]
+  const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
 
   const rawReply = await callOpenRouter(enhancedMessages, model)
 

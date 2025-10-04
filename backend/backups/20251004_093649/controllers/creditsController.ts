@@ -1,6 +1,5 @@
 import { Response } from 'express';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
 
 /**
@@ -10,7 +9,7 @@ export const getBalance = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
 
-    const [users] = await query(pool, 
+    const [users] = await pool.query(
       'SELECT credits, is_vip FROM users WHERE id = ?',
       [userId]
     );
@@ -56,7 +55,7 @@ export const getTransactions = async (req: AuthRequest, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = (page - 1) * limit;
 
-    const [transactions] = await query(pool, 
+    const [transactions] = await pool.query(
       `SELECT id, type, amount, balance_after, description, created_at
        FROM credit_transactions
        WHERE user_id = ?
@@ -65,7 +64,7 @@ export const getTransactions = async (req: AuthRequest, res: Response) => {
       [userId, limit, offset]
     );
 
-    const [countResult] = await query(pool, 
+    const [countResult] = await pool.query(
       'SELECT COUNT(*) as total FROM credit_transactions WHERE user_id = ?',
       [userId]
     );
@@ -107,10 +106,10 @@ export const deductCredits = async (
   amount: number,
   description: string
 ): Promise<number | null> => {
-  const connection = await pool.connect();
+  const connection = await pool.getConnection();
 
   try {
-    await connection.query('BEGIN');
+    await connection.beginTransaction();
 
     // 查询当前余额
     const [users] = await connection.query(
@@ -119,7 +118,7 @@ export const deductCredits = async (
     );
 
     if (!Array.isArray(users) || users.length === 0) {
-      await connection.query('ROLLBACK');
+      await connection.rollback();
       return null;
     }
 
@@ -127,7 +126,7 @@ export const deductCredits = async (
 
     // 检查余额是否足够
     if (currentCredits < amount) {
-      await connection.query('ROLLBACK');
+      await connection.rollback();
       return null;
     }
 
@@ -154,10 +153,10 @@ export const deductCredits = async (
       ]
     );
 
-    await connection.query('COMMIT');
+    await connection.commit();
     return newBalance;
   } catch (error) {
-    await connection.query('ROLLBACK');
+    await connection.rollback();
     throw error;
   } finally {
     connection.release();
@@ -176,10 +175,10 @@ export const addCredits = async (
   amount: number,
   description: string
 ): Promise<number> => {
-  const connection = await pool.connect();
+  const connection = await pool.getConnection();
 
   try {
-    await connection.query('BEGIN');
+    await connection.beginTransaction();
 
     // 查询当前余额
     const [users] = await connection.query(
@@ -213,10 +212,10 @@ export const addCredits = async (
       ]
     );
 
-    await connection.query('COMMIT');
+    await connection.commit();
     return newBalance;
   } catch (error) {
-    await connection.query('ROLLBACK');
+    await connection.rollback();
     throw error;
   } finally {
     connection.release();

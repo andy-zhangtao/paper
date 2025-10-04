@@ -24,6 +24,8 @@ import aiRoutes from './routes/aiRoutes';
 app.use('/api/ai', aiRoutes);
 import userRoutes from './routes/userRoutes';
 app.use('/api/user', userRoutes);
+import paperCreationRoutes from './routes/paperCreationRoutes';
+app.use('/api/paper-creation', paperCreationRoutes);
 
 // 管理员路由
 import adminAuthRoutes from './routes/adminAuthRoutes';

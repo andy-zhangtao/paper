@@ -1,6 +1,12 @@
 import type { User, AuthResponse } from '@/types/user'
 import type { Paper } from '@/types/paper'
 import type { CreditBalance, CreditTransaction, RechargePackage } from '@/types/credit'
+import type {
+  PaperCreationPromptsResponse,
+  PaperCreationChatRequest,
+  PaperCreationChatResponse,
+  PaperCreationStageCode,
+} from '@/types/prompt'
 
 // Mock 用户数据
 export const mockUser: User = {
@@ -137,6 +143,88 @@ export const mockRechargePackages: RechargePackage[] = [
     isPopular: false
   }
 ]
+
+export const mockPaperCreationPrompts: PaperCreationPromptsResponse = {
+  stages: [
+    {
+      code: 'idea',
+      displayName: '选择创意',
+      description: '帮助用户确定论文研究方向与创意亮点',
+      prompts: [
+        {
+          id: 'idea-system-1',
+          title: '学术创意提炼专家',
+          scope: 'system',
+        },
+        {
+          id: 'idea-user-1',
+          title: '聚焦AI伦理选题',
+          scope: 'user',
+          content: '请围绕人工智能伦理与治理方向，帮助我提出3个具有研究价值的论文题目，并说明创新点。',
+        },
+        {
+          id: 'idea-user-2',
+          title: '关注可持续发展',
+          scope: 'user',
+          content: '基于可持续发展视角，给出关于能源管理或环境治理的论文选题建议。',
+        },
+      ],
+    },
+    {
+      code: 'outline',
+      displayName: '生成大纲',
+      description: '梳理论文的章节结构与逻辑',
+      prompts: [
+        {
+          id: 'outline-system-1',
+          title: '结构化写作导师',
+          scope: 'system',
+        },
+        {
+          id: 'outline-user-1',
+          title: '强调实验设计',
+          scope: 'user',
+          content: '请在大纲中重点突出实验设计章节，包含数据来源、实验方法和结果分析部分。',
+        },
+      ],
+    },
+    {
+      code: 'content',
+      displayName: '填充内容',
+      description: '根据大纲撰写具体正文',
+      prompts: [
+        {
+          id: 'content-system-1',
+          title: '严谨写作助手',
+          scope: 'system',
+        },
+        {
+          id: 'content-user-1',
+          title: '强调实证分析',
+          scope: 'user',
+          content: '撰写正文时请详细展开实证分析部分，给出可能的数据指标和分析方法。',
+        },
+      ],
+    },
+  ],
+}
+
+export const mockPaperCreationChat = async (
+  payload: PaperCreationChatRequest,
+): Promise<PaperCreationChatResponse> => {
+  const { stage, message } = payload
+  let reply = ''
+
+  if (stage === 'idea') {
+    reply = `根据你的想法「${message}」，我梳理了三个可供选择的论文创意：\n\n1. **数据驱动的伦理决策模型**：从算法透明度与责任分配角度切入，探讨如何在实际部署中保证公平性。\n2. **人机协同下的医疗诊断伦理框架**：聚焦AI辅助诊断过程中的隐私、安全与知情同意问题。\n3. **生成式AI内容审核策略研究**：分析不同审核机制对虚假信息与版权风险的应对效果。\n\n如果满意，可以回复「确认」继续生成大纲；如需调整，请描述你的偏好。`
+  } else if (stage === 'outline') {
+    reply = `我已经根据你的需求草拟了论文大纲结构：\n\n## 论文大纲\n\n### 1. 引言\n- 研究背景与问题陈述\n- 研究意义与创新点\n\n### 2. 理论基础与相关工作\n- 核心理论框架\n- 国内外研究进展\n\n### 3. 研究设计\n- 数据来源与预处理\n- 模型或方法设计\n- 实验方案与评估指标\n\n### 4. 实验与结果分析\n- 实验结果展示\n- 对比分析与讨论\n\n### 5. 结论与展望\n- 研究结论\n- 局限性与未来工作方向\n\n如需强调特定章节，请告诉我，我可以进一步调整。`
+  } else {
+    reply = `下面是正文草稿的首段内容示例：\n\n## 1. 引言\n随着人工智能技术的迅速发展，伦理治理问题逐渐成为学术界与产业界关注的焦点。现有研究多聚焦于算法公平性、隐私保护以及透明度三大维度，但在具体应用场景中仍面临落地难题。为回应这一挑战，本研究以${message}为切入点，构建兼顾技术可行性与伦理可接受性的分析框架。\n\n需要我继续完善后续章节吗？`
+  }
+
+  return mockApiResponse({ reply }, 800)
+}
 
 // Mock API 延迟
 export const delay = (ms: number = 500) => new Promise(resolve => setTimeout(resolve, ms))

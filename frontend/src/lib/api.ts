@@ -7,7 +7,9 @@ import {
   mockRechargePackages,
   mockApiResponse,
   mockApiError,
-  delay
+  delay,
+  mockPaperCreationPrompts,
+  mockPaperCreationChat
 } from './mock'
 import type {
   LoginRequest,
@@ -30,6 +32,12 @@ import type {
   AITranslateRequest,
   AITranslateResponse
 } from '@/types/credit'
+import type {
+  PaperCreationPromptsResponse,
+  PaperCreationStageCode,
+  PaperCreationChatRequest,
+  PaperCreationChatResponse
+} from '@/types/prompt'
 
 // 是否使用 Mock 数据（开发阶段使用）
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
@@ -163,6 +171,45 @@ export const paperApi = {
       return
     }
     return api.delete(`/papers/${id}`)
+  }
+}
+
+export const paperCreationApi = {
+  async getPrompts(stage?: PaperCreationStageCode): Promise<PaperCreationPromptsResponse> {
+    if (USE_MOCK) {
+      if (stage) {
+        const matched = mockPaperCreationPrompts.stages.find(item => item.code === stage)
+        return mockApiResponse({ stages: matched ? [matched] : [] })
+      }
+      return mockApiResponse(mockPaperCreationPrompts)
+    }
+
+    const result = await api.get('/paper-creation/prompts', stage ? { params: { stage } } : undefined)
+
+    if (result && typeof result === 'object' && 'success' in result) {
+      const typedResult = result as {
+        success: boolean
+        data?: PaperCreationPromptsResponse
+        error?: { message?: string }
+      }
+
+      if (!typedResult.success) {
+        const message = typedResult.error?.message || '加载提示词失败'
+        throw new Error(message)
+      }
+
+      return typedResult.data ?? { stages: [] }
+    }
+
+    return result
+  },
+
+  async chat(data: PaperCreationChatRequest): Promise<PaperCreationChatResponse> {
+    if (USE_MOCK) {
+      return mockPaperCreationChat(data)
+    }
+
+    return api.post('/paper-creation/chat', data)
   }
 }
 

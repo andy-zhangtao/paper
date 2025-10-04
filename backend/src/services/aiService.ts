@@ -285,3 +285,16 @@ ${newContent.substring(0, 500)}...
 
   return summary.substring(0, 100); // 限制长度
 }
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export async function chatCompletion(messages: ChatMessage[], model: string = AI_MODELS.default) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error('messages不能为空');
+  }
+
+  return callOpenRouter(messages, model);
+}

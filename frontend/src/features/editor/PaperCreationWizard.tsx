@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Send, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,7 +10,9 @@ import type {
   PaperCreationStageCode,
   PromptTemplateSummary,
   PaperCreationChatMessage,
+  PaperCreationState,
 } from '@/types/prompt'
+import { usePaperCreationState } from './usePaperCreationState'
 
 type CreationStage = PaperCreationStageCode
 type Step = CreationStage | 'preview'
@@ -56,7 +58,7 @@ const STEP_INTRO_MESSAGES: Record<Step, string> = {
 const STEP_NEXT_LABEL: Record<CreationStage, string> = {
   idea: '生成论文大纲',
   outline: '进入正文生成',
-  content: '预览完整论文',
+  content: '预览论文',
 }
 
 const STEP_RESULT_TITLES: Record<CreationStage, string> = {
@@ -71,6 +73,213 @@ const STEP_QUICK_REPLIES: Partial<Record<CreationStage, string[]>> = {
   content: ['逐章节生成内容', '先写引言部分', '补充实验与结果章节'],
 }
 
+interface StatusCardProps {
+  state: PaperCreationState | null
+  onReset: () => void
+  currentStage: Step
+}
+
+const StatusCard = ({ state, onReset, currentStage }: StatusCardProps) => {
+  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [position, setPosition] = useState({ x: 40, y: 40 })
+  const dragOffsetRef = useRef<{ x: number; y: number } | null>(null)
+  const cardRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem('paper-creation-status-position') : null
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          setPosition({
+            x: Math.max(16, parsed.x),
+            y: Math.max(16, parsed.y),
+          })
+        }
+      } catch (error) {
+        console.warn('解析状态卡片位置失败:', error)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('paper-creation-status-position', JSON.stringify(position))
+  }, [position])
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    const cardEl = cardRef.current
+    if (!cardEl) return
+    const rect = cardEl.getBoundingClientRect()
+    dragOffsetRef.current = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    }
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const offset = dragOffsetRef.current
+      if (!offset || !cardRef.current) return
+
+      const nextX = moveEvent.clientX - offset.x
+      const nextY = moveEvent.clientY - offset.y
+
+      const cardWidth = cardRef.current.offsetWidth
+      const cardHeight = cardRef.current.offsetHeight
+
+      setPosition(() => {
+        const maxX = window.innerWidth - cardWidth - 16
+        const maxY = window.innerHeight - cardHeight - 16
+        return {
+          x: Math.min(Math.max(16, nextX), Math.max(16, maxX)),
+          y: Math.min(Math.max(16, nextY), Math.max(16, maxY)),
+        }
+      })
+    }
+
+    const handleMouseUp = () => {
+      dragOffsetRef.current = null
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+  }
+
+  const topicText = state?.topic && state.topic.trim().length
+    ? state.topic
+    : 'AI 暂未确定论文方向，可继续与助手交流。'
+  const outlineItems = state?.outline?.filter((item) => item?.heading?.trim().length) ?? []
+  const confidence = typeof state?.confidence === 'number' ? Math.round(state.confidence * 100) : null
+  const stageLabel = state?.stage ? STEP_TITLES[state.stage] : '未判定'
+  const contentSections = state?.contentSections ?? []
+
+  const updatedLabel = state?.updatedAt
+    ? new Date(state.updatedAt).toLocaleString()
+    : null
+
+  return (
+    <aside
+      ref={cardRef}
+      className="fixed z-40 hidden w-80 max-w-[90vw] flex-col rounded-xl border border-emerald-200 bg-white/95 shadow-xl backdrop-blur lg:flex"
+      style={{ left: position.x, top: position.y, maxHeight: '70vh' }}
+    >
+      <div
+        className="cursor-move select-none border-b p-4 active:cursor-grabbing"
+        onMouseDown={handleMouseDown}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">创作状态</h3>
+            <p className="mt-1 text-xs text-gray-500">AI 根据对话实时推断关键信息</p>
+          </div>
+          <button
+            type="button"
+            className="rounded-md p-1 text-gray-500 hover:bg-emerald-50 hover:text-emerald-600"
+            onClick={() => setIsCollapsed((prev) => !prev)}
+          >
+            {isCollapsed ? '展开' : '收起'}
+          </button>
+        </div>
+      </div>
+      {!isCollapsed && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <section className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>当前阶段</span>
+            <span className="text-gray-700">{STEP_TITLES[currentStage]}</span>
+          </div>
+          <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+            <div className="text-xs text-gray-500">AI 推测阶段</div>
+            <div className="mt-1 text-sm font-medium text-gray-900">{stageLabel}</div>
+            {confidence !== null && (
+              <div className="mt-1 text-xs text-gray-500">置信度约 {confidence}%</div>
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <div className="text-xs font-semibold text-gray-500">论文方向</div>
+          <div className="rounded-lg border border-gray-100 bg-white p-3 text-sm text-gray-800 whitespace-pre-wrap">
+            {topicText}
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>章节结构</span>
+            <span>{outlineItems.length > 0 ? `${outlineItems.length} 个节点` : '未生成'}</span>
+          </div>
+          <div className="rounded-lg border border-gray-100 bg-white p-3">
+            {outlineItems.length > 0 ? (
+              <ol className="space-y-2 text-sm text-gray-800">
+                {outlineItems.map((item, index) => (
+                  <li key={`${item.heading}-${index}`} className="space-y-1">
+                    <div className="font-medium text-gray-900">
+                      {index + 1}. {item.heading}
+                    </div>
+                    {item.summary && (
+                      <p className="text-xs text-gray-600 whitespace-pre-wrap">{item.summary}</p>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-xs text-gray-500">等待AI生成大纲或继续补充需求。</p>
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>正文章节</span>
+            <span>
+              {state?.contentApproved && contentSections.length
+                ? `${contentSections.length} 个章节`
+                : '未完成'}
+            </span>
+          </div>
+          <div className="rounded-lg border border-gray-100 bg-white p-3 max-h-48 overflow-y-auto">
+            {contentSections.length > 0 ? (
+              <ol className="space-y-3 text-sm text-gray-800">
+                {contentSections.map((section, index) => (
+                  <li key={`${section.heading}-${index}`} className="space-y-1">
+                    <div className="font-medium text-gray-900">
+                      {index + 1}. {section.heading}
+                    </div>
+                    <p className="text-xs text-gray-600 whitespace-pre-wrap">
+                      {section.content.slice(0, 200)}
+                      {section.content.length > 200 ? '...' : ''}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-xs text-gray-500">当你确认正文满意后，这里将展示章节内容。</p>
+            )}
+          </div>
+        </section>
+
+        {updatedLabel && (
+          <p className="text-[10px] text-gray-400">最近更新：{updatedLabel}</p>
+        )}
+        </div>
+      )}
+      <div className="border-t p-4">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={onReset}
+          disabled={!state}
+        >
+          清除状态
+        </Button>
+      </div>
+    </aside>
+  )
+}
+
 interface StagePromptInfo {
   displayName: string
   description: string | null
@@ -78,6 +287,7 @@ interface StagePromptInfo {
 }
 
 export const PaperCreationWizard = () => {
+  const { state: paperState, updateState, resetState } = usePaperCreationState()
   const [step, setStep] = useState<Step>('idea')
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -126,7 +336,13 @@ export const PaperCreationWizard = () => {
     content: generatedContent,
   }
   const currentStageResult = currentStage ? stageResults[currentStage] : ''
-  const hasResultForCurrentStage = Boolean(currentStage && currentStageResult)
+  const contentSections = paperState?.contentSections ?? []
+  const contentReady = Boolean(paperState?.contentApproved && contentSections.length > 0)
+  const hasResultForCurrentStage = currentStage
+    ? currentStage === 'content'
+      ? contentReady
+      : Boolean(currentStageResult)
+    : false
 
   useEffect(() => {
     const fetchPrompts = async () => {
@@ -197,10 +413,15 @@ export const PaperCreationWizard = () => {
         promptId: promptForRequest,
         message: trimmedInput,
         history,
+        stateSnapshot: paperState ?? undefined,
       })
 
       const reply = response.reply
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
+
+      if (response.state && Object.keys(response.state).length > 0) {
+        updateState(response.state)
+      }
 
       if (stageForRequest === 'idea') {
         setGeneratedIdea(reply)
@@ -358,7 +579,25 @@ export const PaperCreationWizard = () => {
   }
 
   const getFinalMarkdown = () => {
-    return generatedContent || generatedOutline || generatedIdea || '# 论文标题\n\n内容生成中...'
+    if (paperState?.contentSections?.length) {
+      return paperState.contentSections
+        .map((section) => `## ${section.heading}\n\n${section.content}`)
+        .join('\n\n')
+    }
+
+    if (generatedContent) {
+      return generatedContent
+    }
+
+    if (generatedOutline) {
+      return generatedOutline
+    }
+
+    if (generatedIdea) {
+      return generatedIdea
+    }
+
+    return '# 论文标题\n\n内容生成中...'
   }
 
   const handleTogglePreview = (stage: CreationStage) => {
@@ -413,12 +652,13 @@ export const PaperCreationWizard = () => {
 
       {/* 主内容区 */}
       <div className="flex-1 overflow-hidden flex">
-        {step !== 'preview' ? (
-          /* 对话式交互界面 */
-          <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
-            {currentStage && (
-              <div className="px-6 pt-6">
-                <Card className="border border-purple-100 shadow-sm">
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+          {step !== 'preview' ? (
+            /* 对话式交互界面 */
+            <div className="flex-1 min-h-0 flex flex-col max-w-4xl mx-auto w-full">
+              {currentStage && (
+                <div className="px-6 pt-6 flex-none">
+                  <Card className="border border-purple-100 shadow-sm">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">
                       提示词选择 · {stageTitle}
@@ -442,9 +682,9 @@ export const PaperCreationWizard = () => {
                 </Card>
               </div>
             )}
-            {currentStage && currentStageResult && (
-              <div className="px-6 pt-4">
-                <Card className="border border-emerald-100 bg-emerald-50/40">
+              {currentStage && currentStageResult && (
+                <div className="px-6 pt-4 flex-none">
+                  <Card className="border border-emerald-100 bg-emerald-50/40">
                   <CardHeader className="pb-1 flex flex-row items-center justify-between gap-2">
                     <CardTitle className="text-sm font-semibold text-emerald-700">
                       {STEP_RESULT_TITLES[currentStage]}
@@ -470,7 +710,7 @@ export const PaperCreationWizard = () => {
               </div>
             )}
             {/* 消息列表 */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
               {messages.map((msg, index) => (
                 <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <Card
@@ -508,7 +748,7 @@ export const PaperCreationWizard = () => {
             </div>
 
             {/* 输入区 */}
-            <div className="border-t bg-white p-4">
+            <div className="border-t bg-white p-4 flex-none">
               <div className="max-w-4xl mx-auto flex flex-col gap-3">
                 <div className="flex gap-2">
                   <Input
@@ -534,12 +774,12 @@ export const PaperCreationWizard = () => {
                       上一步
                     </Button>
                   )}
-                  {hasResultForCurrentStage && currentStage && (
-                    <Button onClick={handleConfirm} variant="gradient" disabled={isLoading}>
-                      <Sparkles className="w-4 h-4 mr-2" />
-                      {STEP_NEXT_LABEL[currentStage]}
-                    </Button>
-                  )}
+                    {hasResultForCurrentStage && currentStage && (
+                      <Button onClick={handleConfirm} variant="gradient" disabled={isLoading}>
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        {STEP_NEXT_LABEL[currentStage]}
+                      </Button>
+                    )}
                 </div>
                 {currentStage && STEP_QUICK_REPLIES[currentStage]?.length ? (
                   <div className="flex flex-wrap gap-2">
@@ -557,50 +797,53 @@ export const PaperCreationWizard = () => {
                 ) : null}
               </div>
             </div>
-          </div>
-        ) : (
-          /* Markdown 预览界面 */
-          <div className="flex-1 overflow-y-auto">
-            <div className="max-w-4xl mx-auto p-8">
-              <Card>
-                <CardHeader>
-                  <CardTitle>论文预览</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="prose prose-lg max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {getFinalMarkdown()}
-                    </ReactMarkdown>
-                  </div>
-                </CardContent>
-              </Card>
+            </div>
+          ) : (
+            /* Markdown 预览界面 */
+            <div className="flex-1 overflow-y-auto">
+              <div className="max-w-4xl mx-auto p-8">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>论文预览</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="prose prose-lg max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {getFinalMarkdown()}
+                      </ReactMarkdown>
+                    </div>
+                  </CardContent>
+                </Card>
 
-              {/* 操作按钮 */}
-              <div className="mt-6 flex gap-4 justify-center">
-                {previousStep && (
-                  <Button variant="outline" onClick={handleGoBack}>
-                    上一步
+                {/* 操作按钮 */}
+                <div className="mt-6 flex gap-4 justify-center">
+                  {previousStep && (
+                    <Button variant="outline" onClick={handleGoBack}>
+                      上一步
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={() => {
+                    setStep('idea')
+                    setMessages([{
+                      role: 'assistant',
+                      content: '让我们重新开始创作一篇新论文！请告诉我你的研究主题。'
+                    }])
+                    resetState()
+                  }}>
+                    重新生成
                   </Button>
-                )}
-                <Button variant="outline" onClick={() => {
-                  setStep('idea')
-                  setMessages([{
-                    role: 'assistant',
-                    content: '让我们重新开始创作一篇新论文！请告诉我你的研究主题。'
-                  }])
-                }}>
-                  重新生成
-                </Button>
-                <Button variant="gradient">
-                  进入编辑器
-                </Button>
-                <Button variant="outline">
-                  导出 Markdown
-                </Button>
+                  <Button variant="gradient">
+                    进入编辑器
+                  </Button>
+                  <Button variant="outline">
+                    导出 Markdown
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+        <StatusCard state={paperState} onReset={resetState} currentStage={step} />
       </div>
     </div>
   )

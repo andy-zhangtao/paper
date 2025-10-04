@@ -24,13 +24,35 @@ export interface PaperCreationChatMessage {
   content: string
 }
 
+export interface PaperCreationStateOutlineItem {
+  heading: string
+  summary?: string
+}
+
+export interface PaperCreationContentSection {
+  heading: string
+  content: string
+}
+
+export interface PaperCreationState {
+  topic?: string | null
+  outline?: PaperCreationStateOutlineItem[]
+  confidence?: number
+  stage?: PaperCreationStageCode
+  updatedAt?: string
+  contentApproved?: boolean
+  contentSections?: PaperCreationContentSection[]
+}
+
 export interface PaperCreationChatRequest {
   stage: PaperCreationStageCode
   promptId: string
   message: string
   history: PaperCreationChatMessage[]
+  stateSnapshot?: PaperCreationState
 }
 
 export interface PaperCreationChatResponse {
   reply: string
+  state?: PaperCreationState
 }

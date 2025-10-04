@@ -297,10 +297,84 @@ export interface ChatMessage {
   content: string
 }
 
-export async function chatCompletion(messages: ChatMessage[], model: string = DEFAULT_MODEL) {
+export interface PaperCreationState {
+  topic?: string
+  outline?: Array<{
+    heading: string
+    summary?: string
+  }>
+  confidence?: number
+  stage?: 'idea' | 'outline' | 'content'
+  updatedAt?: string
+  contentApproved?: boolean
+  contentSections?: Array<{
+    heading: string
+    content: string
+  }>
+}
+
+export interface PaperCreationChatResult {
+  reply: string
+  state?: PaperCreationState
+}
+
+export async function chatCompletion(
+  messages: ChatMessage[],
+  model: string = DEFAULT_MODEL,
+  stateSnapshot?: PaperCreationState,
+): Promise<PaperCreationChatResult> {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('messages不能为空');
   }
 
-  return callOpenRouter(messages, model);
+  const assistantInstructions =
+    '你是Paper AI论文写作助手。请在帮助用户的同时，根据对话判断核心信息，并按以下格式回应：\n' +
+    '1. 先输出自然语言回答。\n' +
+    '2. 紧接着输出一个以<STATE>开始、</STATE>结束的JSON。JSON字段要求：\n' +
+    '- topic: string|null，无法确认请为null。\n' +
+    '- outline: 数组(可为空)，元素包含heading与可选summary，用于概述章节结构。\n' +
+    '- confidence: 0-1之间数字，表示你对topic/outline判断的信心。\n' +
+    '- stage: idea|outline|content (可选)，表明你认为用户所处阶段。\n' +
+    '- contentApproved: boolean，当你判断用户对生成的正文内容满意且准备进入预览时为true。\n' +
+    '- contentSections: 当contentApproved为true时必须提供的数组，每个元素包含heading(章节标题)与content(对应的Markdown正文)。\n' +
+    '示例：\n回答内容...\n<STATE>{"topic":"论文主题","outline":[{"heading":"章节"}],"contentApproved":false,"contentSections":[]}</STATE>'
+
+  const enhancedMessages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: assistantInstructions,
+    },
+    ...(stateSnapshot
+      ? [
+          {
+            role: 'system' as const,
+            content: `当前已知的论文状态(JSON)：${JSON.stringify(stateSnapshot)}`,
+          },
+        ]
+      : []),
+    ...messages,
+  ]
+
+  const rawReply = await callOpenRouter(enhancedMessages, model)
+
+  const stateMatch = rawReply.match(/<STATE>([\s\S]*?)<\/STATE>/)
+  let parsedState: PaperCreationState | undefined
+  if (stateMatch) {
+    const jsonText = stateMatch[1]
+    try {
+      parsedState = {
+        ...JSON.parse(jsonText),
+        updatedAt: new Date().toISOString(),
+      }
+    } catch (err) {
+      console.warn('解析PaperCreation状态失败:', err)
+    }
+  }
+
+  const cleanReply = rawReply.replace(/<STATE>[\s\S]*?<\/STATE>/, '').trim()
+
+  return {
+    reply: cleanReply,
+    state: parsedState,
+  }
 }

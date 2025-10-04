@@ -153,11 +153,12 @@ export const chatWithPrompt = async (req: AuthRequest, res: Response) => {
       })
     }
 
-    const { stage, promptId, message, history } = req.body as {
+    const { stage, promptId, message, history, stateSnapshot } = req.body as {
       stage?: string
       promptId?: string
       message?: string
       history?: ChatHistoryItem[]
+      stateSnapshot?: aiService.PaperCreationState
     }
 
     if (!stage || !isValidPaperCreationStage(stage)) {
@@ -238,12 +239,13 @@ export const chatWithPrompt = async (req: AuthRequest, res: Response) => {
       { role: 'user' as const, content: message.trim() },
     ]
 
-    const aiResponse = await aiService.chatCompletion(messages)
+    const aiResponse = await aiService.chatCompletion(messages, undefined, stateSnapshot)
 
     return res.json({
       success: true,
       data: {
-        reply: aiResponse,
+        reply: aiResponse.reply,
+        state: aiResponse.state,
       },
     })
   } catch (error) {

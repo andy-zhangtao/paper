@@ -6,6 +6,7 @@ import type {
   PaperCreationChatRequest,
   PaperCreationChatResponse,
   PaperCreationStageCode,
+  PaperCreationState,
 } from '@/types/prompt'
 
 // Mock 用户数据
@@ -214,16 +215,37 @@ export const mockPaperCreationChat = async (
 ): Promise<PaperCreationChatResponse> => {
   const { stage, message } = payload
   let reply = ''
+  let state: PaperCreationState | undefined
 
   if (stage === 'idea') {
     reply = `根据你的想法「${message}」，我梳理了三个可供选择的论文创意：\n\n1. **数据驱动的伦理决策模型**：从算法透明度与责任分配角度切入，探讨如何在实际部署中保证公平性。\n2. **人机协同下的医疗诊断伦理框架**：聚焦AI辅助诊断过程中的隐私、安全与知情同意问题。\n3. **生成式AI内容审核策略研究**：分析不同审核机制对虚假信息与版权风险的应对效果。\n\n如果满意，可以回复「确认」继续生成大纲；如需调整，请描述你的偏好。`
+    state = {
+      topic: `聚焦${message}的论文方向`,
+      confidence: 0.65,
+      stage: 'idea',
+    }
   } else if (stage === 'outline') {
     reply = `我已经根据你的需求草拟了论文大纲结构：\n\n## 论文大纲\n\n### 1. 引言\n- 研究背景与问题陈述\n- 研究意义与创新点\n\n### 2. 理论基础与相关工作\n- 核心理论框架\n- 国内外研究进展\n\n### 3. 研究设计\n- 数据来源与预处理\n- 模型或方法设计\n- 实验方案与评估指标\n\n### 4. 实验与结果分析\n- 实验结果展示\n- 对比分析与讨论\n\n### 5. 结论与展望\n- 研究结论\n- 局限性与未来工作方向\n\n如需强调特定章节，请告诉我，我可以进一步调整。`
+    state = {
+      outline: [
+        { heading: '引言', summary: '交代研究背景、问题陈述与研究意义。' },
+        { heading: '理论基础与相关工作', summary: '梳理核心理论及国内外研究进展。' },
+        { heading: '研究设计', summary: '说明数据来源、模型方法与评估指标。' },
+        { heading: '实验与结果分析', summary: '展示实验结果并进行对比讨论。' },
+        { heading: '结论与展望', summary: '总结研究并提出未来展望。' },
+      ],
+      confidence: 0.75,
+      stage: 'outline',
+    }
   } else {
     reply = `下面是正文草稿的首段内容示例：\n\n## 1. 引言\n随着人工智能技术的迅速发展，伦理治理问题逐渐成为学术界与产业界关注的焦点。现有研究多聚焦于算法公平性、隐私保护以及透明度三大维度，但在具体应用场景中仍面临落地难题。为回应这一挑战，本研究以${message}为切入点，构建兼顾技术可行性与伦理可接受性的分析框架。\n\n需要我继续完善后续章节吗？`
+    state = {
+      stage: 'content',
+      confidence: 0.8,
+    }
   }
 
-  return mockApiResponse({ reply }, 800)
+  return mockApiResponse({ reply, state }, 800)
 }
 
 // Mock API 延迟

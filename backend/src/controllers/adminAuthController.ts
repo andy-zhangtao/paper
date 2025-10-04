@@ -29,9 +29,10 @@ export const adminLogin = async (req: Request, res: Response) => {
     }
 
     // 查询管理员
-    const [admins] = await pool.query<Admin[]>(
-      'SELECT * FROM admins WHERE username = ? AND status = "active"',
-      [username]
+    const [admins] = await query(
+      pool,
+      'SELECT * FROM admins WHERE username = ? AND status = ?',
+      [username, 'active']
     );
 
     if (admins.length === 0) {
@@ -79,7 +80,8 @@ export const getAdminProfile = async (req: AdminRequest, res: Response) => {
   try {
     const adminId = req.adminId;
 
-    const [admins] = await pool.query<Admin[]>(
+    const [admins] = await query(
+      pool,
       'SELECT id, username, email, name, status, last_login_at FROM admins WHERE id = ?',
       [adminId]
     );
@@ -110,7 +112,8 @@ export const changeAdminPassword = async (req: AdminRequest, res: Response) => {
     }
 
     // 查询管理员
-    const [admins] = await pool.query<Admin[]>(
+    const [admins] = await query(
+      pool,
       'SELECT * FROM admins WHERE id = ?',
       [adminId]
     );

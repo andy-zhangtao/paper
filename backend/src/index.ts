@@ -1,9 +1,8 @@
 import express, { Request, Response } from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import { testConnection } from './config/database';
 import authRoutes from './routes/authRoutes';
-import { SERVER_CONFIG, CORS_CONFIG } from './config/constants';
+import { SERVER_CONFIG } from './config/constants';
 
 // 加载环境变量
 dotenv.config();
@@ -11,10 +10,7 @@ dotenv.config();
 const app = express();
 
 // 中间件
-app.use(cors({
-  origin: CORS_CONFIG.origin,
-  credentials: CORS_CONFIG.credentials,
-}));
+// CORS 已由 Nginx 统一处理，后端不再配置
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

@@ -29,9 +29,11 @@ app.use('/api/user', userRoutes);
 import adminAuthRoutes from './routes/adminAuthRoutes';
 import adminUserRoutes from './routes/adminUserRoutes';
 import adminStatsRoutes from './routes/adminStatsRoutes';
+import adminPromptTemplateRoutes from './routes/adminPromptTemplateRoutes';
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/stats', adminStatsRoutes);
+app.use('/api/admin/prompts', adminPromptTemplateRoutes);
 
 // 健康检查
 app.get('/health', (req: Request, res: Response) => {

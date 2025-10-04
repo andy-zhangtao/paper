@@ -32,11 +32,11 @@ import type {
 } from '@/types/credit'
 
 // 是否使用 Mock 数据（开发阶段使用）
-const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true' || true
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
 // API 客户端配置
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api',
   timeout: 10000,
 })
 
@@ -53,9 +53,10 @@ api.interceptors.request.use(config => {
 api.interceptors.response.use(
   response => response.data,
   error => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      window.location.href = '/login'
+    // 401错误不在拦截器中跳转,由各组件自行处理
+    // 其他错误统一处理
+    if (error.response?.status === 500) {
+      console.error('服务器错误:', error.response.data)
     }
     return Promise.reject(error)
   }

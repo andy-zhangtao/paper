@@ -209,7 +209,28 @@ export const paperCreationApi = {
       return mockPaperCreationChat(data)
     }
 
-    return api.post('/paper-creation/chat', data)
+    const result = await api.post('/paper-creation/chat', data)
+
+    if (result && typeof result === 'object' && 'success' in result) {
+      const typedResult = result as {
+        success: boolean
+        data?: PaperCreationChatResponse
+        error?: { message?: string }
+      }
+
+      if (!typedResult.success) {
+        const message = typedResult.error?.message || '对话生成失败'
+        throw new Error(message)
+      }
+
+      if (!typedResult.data) {
+        throw new Error('对话结果为空')
+      }
+
+      return typedResult.data
+    }
+
+    return result
   }
 }
 

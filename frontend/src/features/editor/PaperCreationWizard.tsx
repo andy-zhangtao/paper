@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Send, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,6 +33,44 @@ const STAGE_FALLBACK_INFO: Record<CreationStage, { title: string; description: s
   },
 }
 
+const STEP_ORDER: Step[] = ['idea', 'outline', 'content', 'preview']
+
+const STEP_TITLES: Record<Step, string> = {
+  idea: '选择创意',
+  outline: '生成大纲',
+  content: '填充内容',
+  preview: '预览完成',
+}
+
+const STEP_INTRO_MESSAGES: Record<Step, string> = {
+  idea:
+    '你好！我是你的AI写作助手。让我们一起创作一篇优质论文吧！\n\n**第一步：选择创意**\n\n请告诉我：\n1. 你想写什么主题的论文？\n2. 你的研究方向是什么？\n3. 有什么特定的角度或想法吗？',
+  outline:
+    '**第二步：生成大纲**\n\n现在我将为你生成详细的论文大纲。你对大纲有什么具体要求吗？（如章节数量、重点内容等）\n\n如果没有特殊要求，请直接回复「生成大纲」。',
+  content:
+    '**第三步：填充内容**\n\n接下来我将为每个章节生成详细内容。你希望我：\n\n1. 自动生成所有章节内容\n2. 逐章节生成，你可以针对每章提出修改意见\n\n请告诉我你的选择，或直接回复「开始生成」。',
+  preview:
+    '**第四步：预览与导出**\n\n论文内容已生成完成！下面是完整的Markdown格式预览。你可以：\n\n- 点击「编辑」进入富文本编辑器继续修改\n- 点击「导出」保存为文档\n- 点击「重新生成」从头开始',
+}
+
+const STEP_NEXT_LABEL: Record<CreationStage, string> = {
+  idea: '生成论文大纲',
+  outline: '进入正文生成',
+  content: '预览完整论文',
+}
+
+const STEP_RESULT_TITLES: Record<CreationStage, string> = {
+  idea: '创意草稿预览',
+  outline: '论文大纲预览',
+  content: '正文内容预览',
+}
+
+const STEP_QUICK_REPLIES: Partial<Record<CreationStage, string[]>> = {
+  idea: ['我想写关于人工智能的论文', '研究方向是教育科技', '帮我提供几个创新的论文选题'],
+  outline: ['生成一个标准五章大纲', '突出研究方法部分', '请增加相关工作章节'],
+  content: ['逐章节生成内容', '先写引言部分', '补充实验与结果章节'],
+}
+
 interface StagePromptInfo {
   displayName: string
   description: string | null
@@ -44,7 +82,7 @@ export const PaperCreationWizard = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: '你好！我是你的AI写作助手。让我们一起创作一篇优质论文吧！\n\n**第一步：选择创意**\n\n请告诉我：\n1. 你想写什么主题的论文？\n2. 你的研究方向是什么？\n3. 有什么特定的角度或想法吗？',
+      content: STEP_INTRO_MESSAGES.idea,
     },
   ])
   const [input, setInput] = useState('')
@@ -70,11 +108,25 @@ export const PaperCreationWizard = () => {
   })
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
+  const [collapsedPreviewStages, setCollapsedPreviewStages] = useState<Record<CreationStage, boolean>>({
+    idea: false,
+    outline: false,
+    content: false,
+  })
 
   const currentStage = step === 'preview' ? null : step
   const currentStageInfo = currentStage ? promptData[currentStage] : undefined
   const currentPromptId = currentStage ? selectedPromptIds[currentStage] : null
   const canSend = Boolean(currentStage && currentPromptId && input.trim())
+  const currentStepIndex = STEP_ORDER.indexOf(step)
+  const previousStep = currentStepIndex > 0 ? STEP_ORDER[currentStepIndex - 1] : null
+  const stageResults: Record<CreationStage, string> = {
+    idea: generatedIdea,
+    outline: generatedOutline,
+    content: generatedContent,
+  }
+  const currentStageResult = currentStage ? stageResults[currentStage] : ''
+  const hasResultForCurrentStage = Boolean(currentStage && currentStageResult)
 
   useEffect(() => {
     const fetchPrompts = async () => {
@@ -171,11 +223,46 @@ export const PaperCreationWizard = () => {
     }
   }
 
+  const appendIntroForStep = (targetStep: Step) => {
+    setMessages((prev) => {
+      const lastMessage = prev[prev.length - 1]
+      if (lastMessage?.role === 'assistant' && lastMessage.content === STEP_INTRO_MESSAGES[targetStep]) {
+        return prev
+      }
+      return [
+        ...prev,
+        {
+          role: 'assistant',
+          content: STEP_INTRO_MESSAGES[targetStep],
+        },
+      ]
+    })
+  }
+
   const handlePromptSelect = (stage: CreationStage, promptId: string) => {
     setSelectedPromptIds((prev) => ({
       ...prev,
       [stage]: promptId,
     }))
+  }
+
+  const handleQuickReply = (text: string) => {
+    setInput(text)
+  }
+
+  const handleGoBack = () => {
+    if (!previousStep) return
+    setStep(previousStep)
+    appendIntroForStep(previousStep)
+  }
+
+  const handleStepSelect = (targetStep: Step) => {
+    const targetIndex = STEP_ORDER.indexOf(targetStep)
+    if (targetIndex === -1 || targetIndex >= currentStepIndex) {
+      return
+    }
+    setStep(targetStep)
+    appendIntroForStep(targetStep)
   }
 
   const renderPromptGroup = (
@@ -260,38 +347,25 @@ export const PaperCreationWizard = () => {
   const handleConfirm = () => {
     if (step === 'idea') {
       setStep('outline')
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '**第二步：生成大纲**\n\n现在我将为你生成详细的论文大纲。你对大纲有什么具体要求吗？（如章节数量、重点内容等）\n\n如果没有特殊要求，请直接回复「生成大纲」。',
-        },
-      ])
+      appendIntroForStep('outline')
     } else if (step === 'outline') {
       setStep('content')
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            '**第三步：填充内容**\n\n接下来我将为每个章节生成详细内容。你希望我：\n\n1. 自动生成所有章节内容\n2. 逐章节生成，你可以针对每章提出修改意见\n\n请告诉我你的选择，或直接回复「开始生成」。',
-        },
-      ])
+      appendIntroForStep('content')
     } else if (step === 'content') {
       setStep('preview')
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            '**第四步：预览与导出**\n\n论文内容已生成完成！下面是完整的Markdown格式预览。你可以：\n\n- 点击「编辑」进入富文本编辑器继续修改\n- 点击「导出」保存为文档\n- 点击「重新生成」从头开始',
-        },
-      ])
+      appendIntroForStep('preview')
     }
   }
 
   const getFinalMarkdown = () => {
     return generatedContent || generatedOutline || generatedIdea || '# 论文标题\n\n内容生成中...'
+  }
+
+  const handleTogglePreview = (stage: CreationStage) => {
+    setCollapsedPreviewStages((prev) => ({
+      ...prev,
+      [stage]: !prev[stage],
+    }))
   }
 
   return (
@@ -300,25 +374,39 @@ export const PaperCreationWizard = () => {
       <div className="bg-white border-b">
         <div className="max-w-4xl mx-auto px-6 py-4">
           <div className="flex items-center gap-2 text-sm">
-            <div className={`flex items-center gap-2 ${step === 'idea' ? 'text-purple-600 font-semibold' : 'text-gray-400'}`}>
-              <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-xs">1</div>
-              <span>选择创意</span>
-            </div>
-            <div className="w-8 h-px bg-gray-300" />
-            <div className={`flex items-center gap-2 ${step === 'outline' ? 'text-purple-600 font-semibold' : 'text-gray-400'}`}>
-              <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-xs">2</div>
-              <span>生成大纲</span>
-            </div>
-            <div className="w-8 h-px bg-gray-300" />
-            <div className={`flex items-center gap-2 ${step === 'content' ? 'text-purple-600 font-semibold' : 'text-gray-400'}`}>
-              <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-xs">3</div>
-              <span>填充内容</span>
-            </div>
-            <div className="w-8 h-px bg-gray-300" />
-            <div className={`flex items-center gap-2 ${step === 'preview' ? 'text-purple-600 font-semibold' : 'text-gray-400'}`}>
-              <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-xs">4</div>
-              <span>预览完成</span>
-            </div>
+            {STEP_ORDER.map((item, index) => {
+              const isActive = step === item
+              const isPastStep = index < currentStepIndex
+              const baseTextClass = isActive
+                ? 'text-purple-600 font-semibold'
+                : isPastStep
+                  ? 'text-gray-600 hover:text-purple-600'
+                  : 'text-gray-400'
+              const circleClass = isActive
+                ? 'bg-purple-100 text-purple-600'
+                : isPastStep
+                  ? 'bg-gray-100 text-gray-600'
+                  : 'bg-gray-100 text-gray-400'
+
+              return (
+                <Fragment key={item}>
+                  <button
+                    type="button"
+                    onClick={() => handleStepSelect(item)}
+                    disabled={!isPastStep}
+                    className={`flex items-center gap-2 focus:outline-none ${
+                      isPastStep ? 'cursor-pointer' : 'cursor-default'
+                    } ${baseTextClass}`}
+                  >
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${circleClass}`}>
+                      {index + 1}
+                    </div>
+                    <span>{STEP_TITLES[item]}</span>
+                  </button>
+                  {index < STEP_ORDER.length - 1 && <div className="w-8 h-px bg-gray-300" />}
+                </Fragment>
+              )
+            })}
           </div>
         </div>
       </div>
@@ -351,6 +439,33 @@ export const PaperCreationWizard = () => {
                       </>
                     )}
                   </CardContent>
+                </Card>
+              </div>
+            )}
+            {currentStage && currentStageResult && (
+              <div className="px-6 pt-4">
+                <Card className="border border-emerald-100 bg-emerald-50/40">
+                  <CardHeader className="pb-1 flex flex-row items-center justify-between gap-2">
+                    <CardTitle className="text-sm font-semibold text-emerald-700">
+                      {STEP_RESULT_TITLES[currentStage]}
+                    </CardTitle>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs text-emerald-600 hover:text-emerald-700"
+                      onClick={() => handleTogglePreview(currentStage)}
+                    >
+                      {collapsedPreviewStages[currentStage] ? '展开' : '收起'}
+                    </Button>
+                  </CardHeader>
+                  {!collapsedPreviewStages[currentStage] && (
+                    <CardContent className="max-h-48 overflow-y-auto text-sm text-emerald-900">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {currentStageResult}
+                      </ReactMarkdown>
+                    </CardContent>
+                  )}
                 </Card>
               </div>
             )}
@@ -394,31 +509,52 @@ export const PaperCreationWizard = () => {
 
             {/* 输入区 */}
             <div className="border-t bg-white p-4">
-              <div className="max-w-4xl mx-auto flex gap-2">
-                <Input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      if (!isLoading && canSend) {
-                        handleSend()
+              <div className="max-w-4xl mx-auto flex flex-col gap-3">
+                <div className="flex gap-2">
+                  <Input
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        if (!isLoading && canSend) {
+                          handleSend()
+                        }
                       }
-                    }
-                  }}
-                  placeholder={currentStage ? '输入你的想法...' : '请先完成提示词选择'}
-                  disabled={isLoading || !currentStage || !currentPromptId}
-                  className="flex-1"
-                />
-                <Button onClick={handleSend} disabled={isLoading || !canSend}>
-                  <Send className="w-4 h-4" />
-                </Button>
-                {(generatedIdea || generatedOutline || generatedContent) && (
-                  <Button onClick={handleConfirm} variant="gradient">
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    下一步
+                    }}
+                    placeholder={currentStage ? '输入你的想法...' : '请先完成提示词选择'}
+                    disabled={isLoading || !currentStage || !currentPromptId}
+                    className="flex-1"
+                  />
+                  <Button onClick={handleSend} disabled={isLoading || !canSend}>
+                    <Send className="w-4 h-4" />
                   </Button>
-                )}
+                  {previousStep && (
+                    <Button variant="outline" onClick={handleGoBack} disabled={isLoading}>
+                      上一步
+                    </Button>
+                  )}
+                  {hasResultForCurrentStage && currentStage && (
+                    <Button onClick={handleConfirm} variant="gradient" disabled={isLoading}>
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      {STEP_NEXT_LABEL[currentStage]}
+                    </Button>
+                  )}
+                </div>
+                {currentStage && STEP_QUICK_REPLIES[currentStage]?.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {STEP_QUICK_REPLIES[currentStage]!.map((reply) => (
+                      <button
+                        key={reply}
+                        type="button"
+                        onClick={() => handleQuickReply(reply)}
+                        className="rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs text-purple-600 transition hover:border-purple-400 hover:bg-purple-100"
+                      >
+                        {reply}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -441,6 +577,11 @@ export const PaperCreationWizard = () => {
 
               {/* 操作按钮 */}
               <div className="mt-6 flex gap-4 justify-center">
+                {previousStep && (
+                  <Button variant="outline" onClick={handleGoBack}>
+                    上一步
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => {
                   setStep('idea')
                   setMessages([{

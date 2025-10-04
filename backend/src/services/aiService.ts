@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { AI_MODELS, AI_PARAMS } from '../config/constants';
+import { AI_MODELS, AI_PARAMS, OPENROUTER_CONFIG } from '../config/constants';
 
 // 创建axios实例，配置代理
 const aiClient = axios.create({
@@ -14,9 +14,11 @@ const aiClient = axios.create({
   timeout: AI_PARAMS.timeout,
 });
 
+const DEFAULT_MODEL = OPENROUTER_CONFIG.modelName || AI_MODELS.default;
+
 // 如果配置了代理，使用代理
-if (process.env.HTTPS_PROXY) {
-  const agent = new HttpsProxyAgent(process.env.HTTPS_PROXY);
+if (OPENROUTER_CONFIG.proxyUrl) {
+  const agent = new HttpsProxyAgent(OPENROUTER_CONFIG.proxyUrl);
   aiClient.defaults.httpsAgent = agent;
 }
 
@@ -26,14 +28,18 @@ export { AI_CREDITS_COST } from '../config/constants';
 /**
  * 调用OpenRouter API
  */
-async function callOpenRouter(messages: any[], model: string = AI_MODELS.default) {
+async function callOpenRouter(messages: any[], model: string) {
   try {
-    const response = await aiClient.post('/chat/completions', {
+    const requestBody = {
       model,
       messages,
       temperature: AI_PARAMS.temperature,
       max_tokens: AI_PARAMS.maxTokens,
-    });
+    };
+
+    console.info('OpenRouter request body:', JSON.stringify(requestBody));
+
+    const response = await aiClient.post('/chat/completions', requestBody);
 
     return response.data.choices[0].message.content;
   } catch (error: any) {
@@ -55,7 +61,7 @@ export async function polishText(text: string, type: 'grammar' | 'logic' | 'styl
   const polished = await callOpenRouter([
     { role: 'system', content: '你是一个专业的学术论文润色助手，擅长优化中文学术论文的表达。' },
     { role: 'user', content: prompts[type] },
-  ]);
+  ], DEFAULT_MODEL);
 
   // 简单的变更检测（实际应用中可以用diff算法）
   const changes = [
@@ -100,7 +106,7 @@ export async function generateOutline(topic: string, paperType: 'research' | 're
   const result = await callOpenRouter([
     { role: 'system', content: '你是一个学术论文写作专家，擅长构建论文框架。' },
     { role: 'user', content: prompt },
-  ]);
+  ], DEFAULT_MODEL);
 
   try {
     // 尝试解析JSON
@@ -152,7 +158,7 @@ ${text}`;
   const result = await callOpenRouter([
     { role: 'system', content: '你是一个专业的中文语法检查助手。' },
     { role: 'user', content: prompt },
-  ]);
+  ], DEFAULT_MODEL);
 
   try {
     const jsonMatch = result.match(/\[[\s\S]*\]/);
@@ -259,7 +265,7 @@ export async function generateDiscussionReply(prompt: string) {
       content: '你是一个专业的学术论文写作助手，擅长回答关于论文写作、结构、逻辑等方面的问题。回答要简洁、专业、有针对性。',
     },
     { role: 'user', content: prompt },
-  ]);
+  ], DEFAULT_MODEL);
 
   return reply;
 }
@@ -281,7 +287,7 @@ ${newContent.substring(0, 500)}...
   const summary = await callOpenRouter([
     { role: 'system', content: '你是一个文档版本对比助手。' },
     { role: 'user', content: prompt },
-  ]);
+  ], DEFAULT_MODEL);
 
   return summary.substring(0, 100); // 限制长度
 }
@@ -291,7 +297,7 @@ export interface ChatMessage {
   content: string
 }
 
-export async function chatCompletion(messages: ChatMessage[], model: string = AI_MODELS.default) {
+export async function chatCompletion(messages: ChatMessage[], model: string = DEFAULT_MODEL) {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('messages不能为空');
   }

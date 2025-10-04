@@ -1,32 +1,32 @@
 #!/bin/bash
 
-# Paper AI 数据库初始化脚本
+# Paper AI 数据库初始化脚本 (PostgreSQL)
 # 用途：创建数据库并初始化表结构
 
 set -e
 
 echo "======================================"
-echo "  Paper AI 数据库初始化"
+echo "  Paper AI 数据库初始化 (PostgreSQL)"
 echo "======================================"
 echo ""
 
-# 检查 MySQL 是否已安装
-if ! command -v mysql &> /dev/null; then
-    echo "❌ 错误：未检测到 MySQL，请先安装 MySQL"
+# 检查 PostgreSQL 是否已安装
+if ! command -v psql &> /dev/null; then
+    echo "❌ 错误：未检测到 PostgreSQL，请先安装 PostgreSQL"
     exit 1
 fi
 
 # 读取数据库配置
-read -p "请输入 MySQL 主机地址 [localhost]: " DB_HOST
+read -p "请输入 PostgreSQL 主机地址 [localhost]: " DB_HOST
 DB_HOST=${DB_HOST:-localhost}
 
-read -p "请输入 MySQL 端口 [3306]: " DB_PORT
-DB_PORT=${DB_PORT:-3306}
+read -p "请输入 PostgreSQL 端口 [5432]: " DB_PORT
+DB_PORT=${DB_PORT:-5432}
 
-read -p "请输入 MySQL 用户名 [root]: " DB_USER
-DB_USER=${DB_USER:-root}
+read -p "请输入 PostgreSQL 用户名 [postgres]: " DB_USER
+DB_USER=${DB_USER:-postgres}
 
-read -sp "请输入 MySQL 密码: " DB_PASSWORD
+read -sp "请输入 PostgreSQL 密码: " DB_PASSWORD
 echo ""
 
 DB_NAME="paper_ai"
@@ -40,7 +40,8 @@ echo ""
 
 # 测试数据库连接
 echo "🔍 测试数据库连接..."
-if ! mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1" &> /dev/null; then
+export PGPASSWORD="$DB_PASSWORD"
+if ! psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -c "SELECT 1" &> /dev/null; then
     echo "❌ 数据库连接失败，请检查配置"
     exit 1
 fi
@@ -49,20 +50,25 @@ echo ""
 
 # 检查数据库是否已存在
 echo "🔍 检查数据库是否已存在..."
-DB_EXISTS=$(mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" -sse "SELECT COUNT(*) FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='$DB_NAME'")
+DB_EXISTS=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'")
 
-if [ "$DB_EXISTS" -eq 1 ]; then
+if [ "$DB_EXISTS" = "1" ]; then
     echo "⚠️  数据库 $DB_NAME 已存在"
     read -p "是否要删除并重建？[y/N]: " CONFIRM
     if [ "$CONFIRM" == "y" ] || [ "$CONFIRM" == "Y" ]; then
         echo "🗑️  删除现有数据库..."
-        mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" -e "DROP DATABASE IF EXISTS $DB_NAME"
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -c "DROP DATABASE IF EXISTS $DB_NAME"
         echo "✅ 数据库已删除"
     else
         echo "❌ 操作已取消"
         exit 1
     fi
 fi
+
+# 创建数据库
+echo "📦 创建数据库 $DB_NAME..."
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -c "CREATE DATABASE $DB_NAME"
+echo "✅ 数据库创建成功"
 
 # 执行 SQL 脚本
 echo ""
@@ -75,7 +81,7 @@ if [ ! -f "$SQL_FILE" ]; then
     exit 1
 fi
 
-mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" < "$SQL_FILE"
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$SQL_FILE"
 
 if [ $? -eq 0 ]; then
     echo "✅ 数据库初始化成功"
@@ -84,23 +90,20 @@ else
     exit 1
 fi
 
-# 创建默认管理员账号
+# 显示默认管理员信息
 echo ""
-echo "👤 创建默认管理员账号..."
-read -p "是否创建默认管理员账号？[Y/n]: " CREATE_ADMIN
-CREATE_ADMIN=${CREATE_ADMIN:-Y}
+echo "👤 默认管理员账号信息："
+echo "  - 用户名：admin"
+echo "  - 密码：admin123"
+echo "  - 邮箱：admin@example.com"
+echo ""
+echo "⚠️  重要提示："
+echo "  1. 请立即通过管理后台修改默认密码"
+echo "  2. 生产环境部署前务必删除默认账号"
+echo ""
 
-if [ "$CREATE_ADMIN" == "y" ] || [ "$CREATE_ADMIN" == "Y" ]; then
-    # 需要使用 Node.js 来生成 bcrypt 密码
-    echo ""
-    echo "⚠️  注意：需要手动通过后端 API 创建管理员账号"
-    echo "   或者使用以下 SQL 语句（密码：admin123）："
-    echo ""
-    echo "   USE paper_ai;"
-    echo "   INSERT INTO admins (id, username, password, email, name) VALUES"
-    echo "   (UUID(), 'admin', '\$2b\$10\$rKGWRzFQxJxM5qV5y5Y5YOqWXqJZQXGxYZQXGxYZQXGxYZQXGxYZ', 'admin@example.com', '系统管理员');"
-    echo ""
-fi
+# 清理环境变量
+unset PGPASSWORD
 
 echo ""
 echo "======================================"

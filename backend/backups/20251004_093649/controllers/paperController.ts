@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
 
 /**
@@ -26,7 +25,7 @@ export const createPaper = async (req: AuthRequest, res: Response) => {
     const now = new Date();
     const paperContent = content || { type: 'doc', content: [] };
 
-    await query(pool, 
+    await pool.query(
       `INSERT INTO papers (id, user_id, title, content, word_count, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [paperId, userId, title, JSON.stringify(paperContent), 0, now, now]
@@ -77,7 +76,7 @@ export const getPapers = async (req: AuthRequest, res: Response) => {
     query += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
 
-    const [papers] = await query(pool, query, params);
+    const [papers] = await pool.query(query, params);
 
     // 获取总数
     let countQuery = 'SELECT COUNT(*) as total FROM papers WHERE user_id = ?';
@@ -87,7 +86,7 @@ export const getPapers = async (req: AuthRequest, res: Response) => {
       countParams.push(JSON.stringify(tag));
     }
 
-    const [countResult] = await query(pool, countQuery, countParams);
+    const [countResult] = await pool.query(countQuery, countParams);
     const total = (countResult as any)[0].total;
 
     return res.status(200).json({
@@ -121,7 +120,7 @@ export const getPaper = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const userId = req.userId;
 
-    const [papers] = await query(pool, 
+    const [papers] = await pool.query(
       'SELECT id, title, content, word_count, tags, created_at, updated_at FROM papers WHERE id = ? AND user_id = ?',
       [id, userId]
     );
@@ -172,7 +171,7 @@ export const updatePaper = async (req: AuthRequest, res: Response) => {
     const { title, content, tags } = req.body;
 
     // 检查论文是否存在
-    const [papers] = await query(pool, 
+    const [papers] = await pool.query(
       'SELECT id FROM papers WHERE id = ? AND user_id = ?',
       [id, userId]
     );
@@ -216,7 +215,7 @@ export const updatePaper = async (req: AuthRequest, res: Response) => {
 
     params.push(id, userId);
 
-    await query(pool, 
+    await pool.query(
       `UPDATE papers SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`,
       params
     );
@@ -249,7 +248,7 @@ export const deletePaper = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const userId = req.userId;
 
-    const [result] = await query(pool, 
+    const [result] = await pool.query(
       'DELETE FROM papers WHERE id = ? AND user_id = ?',
       [id, userId]
     ) as any;

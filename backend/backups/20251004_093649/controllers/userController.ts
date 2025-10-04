@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
 import { addCredits } from './creditsController';
 import { REWARDS, INVITE_CODE, FRONTEND_URL } from '../config/constants';
@@ -17,9 +16,9 @@ export const checkin = async (req: AuthRequest, res: Response) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [existingCheckin] = await query(pool, 
+    const [existingCheckin] = await pool.query(
       `SELECT id FROM user_checkins
-       WHERE user_id = ? AND checkin_date::date = DATE(?)`,
+       WHERE user_id = ? AND DATE(checkin_date) = DATE(?)`,
       [userId, today]
     );
 
@@ -34,7 +33,7 @@ export const checkin = async (req: AuthRequest, res: Response) => {
     }
 
     // 获取连续签到天数
-    const [lastCheckin] = await query(pool, 
+    const [lastCheckin] = await pool.query(
       `SELECT checkin_date FROM user_checkins
        WHERE user_id = ?
        ORDER BY checkin_date DESC
@@ -52,10 +51,10 @@ export const checkin = async (req: AuthRequest, res: Response) => {
 
       if (lastDate.getTime() === yesterday.getTime()) {
         // 连续签到
-        const [streakResult] = await query(pool, 
+        const [streakResult] = await pool.query(
           `SELECT COUNT(*) as count FROM user_checkins
            WHERE user_id = ?
-           AND checkin_date >= ? - INTERVAL '30 days'`,
+           AND checkin_date >= DATE_SUB(?, INTERVAL 30 DAY)`,
           [userId, today]
         );
         streakDays = ((streakResult as any)[0].count || 0) + 1;
@@ -63,7 +62,7 @@ export const checkin = async (req: AuthRequest, res: Response) => {
     }
 
     // 记录签到
-    await query(pool, 
+    await pool.query(
       'INSERT INTO user_checkins (id, user_id, checkin_date) VALUES (?, ?, ?)',
       [uuidv4(), userId, new Date()]
     );
@@ -99,7 +98,7 @@ export const generateInviteCode = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
 
     // 查询用户是否已有邀请码
-    const [existingCode] = await query(pool, 
+    const [existingCode] = await pool.query(
       'SELECT invite_code FROM users WHERE id = ?',
       [userId]
     );
@@ -110,7 +109,7 @@ export const generateInviteCode = async (req: AuthRequest, res: Response) => {
     if (!inviteCode) {
       inviteCode = generateRandomCode();
 
-      await query(pool, 
+      await pool.query(
         'UPDATE users SET invite_code = ? WHERE id = ?',
         [inviteCode, userId]
       );
@@ -160,7 +159,7 @@ export const redeemInviteCode = async (req: AuthRequest, res: Response) => {
     }
 
     // 检查用户是否已使用过邀请码
-    const [currentUser] = await query(pool, 
+    const [currentUser] = await pool.query(
       'SELECT used_invite_code FROM users WHERE id = ?',
       [userId]
     );
@@ -176,7 +175,7 @@ export const redeemInviteCode = async (req: AuthRequest, res: Response) => {
     }
 
     // 查找邀请人
-    const [inviter] = await query(pool, 
+    const [inviter] = await pool.query(
       'SELECT id, invite_code FROM users WHERE invite_code = ?',
       [code]
     );
@@ -211,19 +210,19 @@ export const redeemInviteCode = async (req: AuthRequest, res: Response) => {
     ]);
 
     // 标记用户已使用邀请码
-    await query(pool, 
+    await pool.query(
       'UPDATE users SET used_invite_code = ? WHERE id = ?',
       [code, userId]
     );
 
     // 记录邀请关系
-    await query(pool, 
+    await pool.query(
       'INSERT INTO user_invites (id, inviter_id, invitee_id, invite_code, created_at) VALUES (?, ?, ?, ?, ?)',
       [uuidv4(), inviterId, userId, code, new Date()]
     );
 
     // 获取新余额
-    const [userBalance] = await query(pool, 
+    const [userBalance] = await pool.query(
       'SELECT credits FROM users WHERE id = ?',
       [userId]
     );

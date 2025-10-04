@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
 import { RowDataPacket } from 'mysql2';
 import { AdminRequest } from '../middleware/adminAuth';
 import { logAdminOperation } from './adminAuthController';
@@ -183,7 +182,7 @@ export const toggleUserStatus = async (req: AdminRequest, res: Response) => {
     const newStatus = user.status === 'active' ? 'banned' : 'active';
 
     // 更新用户状态
-    await query(pool, 
+    await pool.query(
       'UPDATE users SET status = ? WHERE id = ?',
       [newStatus, userId]
     );
@@ -233,8 +232,8 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
     const newBalance = user.credits + Number(amount);
 
     // 开启事务
-    const connection = await pool.connect();
-    await connection.query('BEGIN');
+    const connection = await pool.getConnection();
+    await connection.beginTransaction();
 
     try {
       // 更新用户积分
@@ -258,7 +257,7 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
         ]
       );
 
-      await connection.query('COMMIT');
+      await connection.commit();
 
       // 记录操作日志
       await logAdminOperation(
@@ -275,7 +274,7 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
         credits: newBalance
       });
     } catch (error) {
-      await connection.query('ROLLBACK');
+      await connection.rollback();
       throw error;
     } finally {
       connection.release();

@@ -3,7 +3,6 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
 import { RowDataPacket } from 'mysql2';
 import { AdminRequest } from '../middleware/adminAuth';
 
@@ -47,8 +46,8 @@ export const adminLogin = async (req: Request, res: Response) => {
     }
 
     // 更新最后登录时间
-    await query(pool, 
-      'UPDATE admins SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?',
+    await pool.query(
+      'UPDATE admins SET last_login_at = NOW() WHERE id = ?',
       [admin.id]
     );
 
@@ -131,7 +130,7 @@ export const changeAdminPassword = async (req: AdminRequest, res: Response) => {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     // 更新密码
-    await query(pool, 
+    await pool.query(
       'UPDATE admins SET password = ? WHERE id = ?',
       [hashedPassword, adminId]
     );
@@ -153,7 +152,7 @@ export const logAdminOperation = async (
   ipAddress?: string
 ) => {
   try {
-    await query(pool, 
+    await pool.query(
       `INSERT INTO admin_operation_logs
        (id, admin_id, operation_type, target_type, target_id, details, ip_address)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,

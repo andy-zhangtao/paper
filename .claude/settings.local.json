@@ -17,7 +17,9 @@
       "Bash(rm:*)",
       "Bash(lsof:*)",
       "Bash(kill:*)",
-      "Bash(xargs kill:*)"
+      "Bash(xargs kill:*)",
+      "Bash(./batch-migrate.sh:*)",
+      "Bash(./fix-sql-functions.sh:*)"
     ],
     "deny": [],
     "ask": []

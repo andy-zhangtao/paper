@@ -1,6 +1,5 @@
 import { Response } from 'express';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
 import { RowDataPacket } from 'mysql2';
 import { AdminRequest } from '../middleware/adminAuth';
 
@@ -13,7 +12,7 @@ export const getSystemOverview = async (req: AdminRequest, res: Response) => {
         COUNT(*) as total_users,
         COUNT(CASE WHEN status = 'active' THEN 1 END) as active_users,
         COUNT(CASE WHEN status = 'banned' THEN 1 END) as banned_users,
-        COUNT(CASE WHEN created_at::date = CURRENT_DATE THEN 1 END) as today_new_users
+        COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN 1 END) as today_new_users
       FROM users`
     );
 
@@ -21,7 +20,7 @@ export const getSystemOverview = async (req: AdminRequest, res: Response) => {
     const [paperStats] = await pool.query<RowDataPacket[]>(
       `SELECT
         COUNT(*) as total_papers,
-        COUNT(CASE WHEN created_at::date = CURRENT_DATE THEN 1 END) as today_new_papers,
+        COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN 1 END) as today_new_papers,
         SUM(word_count) as total_words
       FROM papers`
     );
@@ -31,8 +30,8 @@ export const getSystemOverview = async (req: AdminRequest, res: Response) => {
       `SELECT
         SUM(CASE WHEN type = 'recharge' THEN amount ELSE 0 END) as total_recharge,
         SUM(CASE WHEN type = 'consume' THEN amount ELSE 0 END) as total_consume,
-        SUM(CASE WHEN type = 'recharge' AND created_at::date = CURRENT_DATE THEN amount ELSE 0 END) as today_recharge,
-        SUM(CASE WHEN type = 'consume' AND created_at::date = CURRENT_DATE THEN amount ELSE 0 END) as today_consume
+        SUM(CASE WHEN type = 'recharge' AND DATE(created_at) = CURDATE() THEN amount ELSE 0 END) as today_recharge,
+        SUM(CASE WHEN type = 'consume' AND DATE(created_at) = CURDATE() THEN amount ELSE 0 END) as today_consume
       FROM credit_transactions`
     );
 
@@ -40,7 +39,7 @@ export const getSystemOverview = async (req: AdminRequest, res: Response) => {
     const [revenueStats] = await pool.query<RowDataPacket[]>(
       `SELECT
         SUM(amount) as total_revenue,
-        SUM(CASE WHEN created_at::date = CURRENT_DATE THEN amount ELSE 0 END) as today_revenue,
+        SUM(CASE WHEN DATE(created_at) = CURDATE() THEN amount ELSE 0 END) as today_revenue,
         COUNT(*) as total_orders,
         COUNT(CASE WHEN status = 'success' THEN 1 END) as success_orders
       FROM recharge_orders
@@ -70,12 +69,12 @@ export const getUserGrowthTrend = async (req: AdminRequest, res: Response) => {
 
     const [trend] = await pool.query<RowDataPacket[]>(
       `SELECT
-        created_at::date as date,
+        DATE(created_at) as date,
         COUNT(*) as new_users,
-        SUM(COUNT(*)) OVER (ORDER BY created_at::date) as cumulative_users
+        SUM(COUNT(*)) OVER (ORDER BY DATE(created_at)) as cumulative_users
       FROM users
-      WHERE created_at >= CURRENT_DATE - INTERVAL ' 1 day' * ?
-      GROUP BY created_at::date
+      WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+      GROUP BY DATE(created_at)
       ORDER BY date ASC`,
       [Number(days)]
     );
@@ -94,13 +93,13 @@ export const getRevenueTrend = async (req: AdminRequest, res: Response) => {
 
     const [trend] = await pool.query<RowDataPacket[]>(
       `SELECT
-        created_at::date as date,
+        DATE(created_at) as date,
         SUM(amount) as daily_revenue,
         COUNT(*) as daily_orders
       FROM recharge_orders
       WHERE status = 'success'
-        AND created_at >= CURRENT_DATE - INTERVAL ' 1 day' * ?
-      GROUP BY created_at::date
+        AND created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+      GROUP BY DATE(created_at)
       ORDER BY date ASC`,
       [Number(days)]
     );
@@ -125,7 +124,7 @@ export const getCreditConsumptionStats = async (req: AdminRequest, res: Response
         SUM(credits_consumed) as total_credits,
         AVG(credits_consumed) as avg_credits
       FROM ai_usage_logs
-      WHERE created_at >= CURRENT_DATE - INTERVAL ' 1 day' * ?
+      WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
       GROUP BY service_type
       ORDER BY total_credits DESC`,
       [Number(days)]
@@ -134,12 +133,12 @@ export const getCreditConsumptionStats = async (req: AdminRequest, res: Response
     // 按日期统计消费
     const [dailyStats] = await pool.query<RowDataPacket[]>(
       `SELECT
-        created_at::date as date,
+        DATE(created_at) as date,
         COUNT(*) as usage_count,
         SUM(credits_consumed) as total_credits
       FROM ai_usage_logs
-      WHERE created_at >= CURRENT_DATE - INTERVAL ' 1 day' * ?
-      GROUP BY created_at::date
+      WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+      GROUP BY DATE(created_at)
       ORDER BY date ASC`,
       [Number(days)]
     );
@@ -214,7 +213,7 @@ export const getPackageSalesStats = async (req: AdminRequest, res: Response) => 
       FROM recharge_packages rp
       LEFT JOIN recharge_orders ro ON rp.id = ro.package_id
         AND ro.status = 'success'
-        AND ro.created_at >= CURRENT_DATE - INTERVAL ' 1 day' * ?
+        AND ro.created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
       WHERE rp.is_active = TRUE
       GROUP BY rp.id
       ORDER BY total_revenue DESC`,
@@ -234,10 +233,10 @@ export const getRealtimeData = async (req: AdminRequest, res: Response) => {
     // 最近1小时的数据
     const [realtimeStats] = await pool.query<RowDataPacket[]>(
       `SELECT
-        (SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour') as new_users_1h,
-        (SELECT COUNT(*) FROM papers WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour') as new_papers_1h,
-        (SELECT COALESCE(SUM(amount), 0) FROM recharge_orders WHERE status = 'success' AND created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour') as revenue_1h,
-        (SELECT COALESCE(SUM(credits_consumed), 0) FROM ai_usage_logs WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour') as consumption_1h
+        (SELECT COUNT(*) FROM users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)) as new_users_1h,
+        (SELECT COUNT(*) FROM papers WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)) as new_papers_1h,
+        (SELECT COALESCE(SUM(amount), 0) FROM recharge_orders WHERE status = 'success' AND created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)) as revenue_1h,
+        (SELECT COALESCE(SUM(credits_consumed), 0) FROM ai_usage_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)) as consumption_1h
       `
     );
 
@@ -249,7 +248,7 @@ export const getRealtimeData = async (req: AdminRequest, res: Response) => {
         al.created_at as last_activity
       FROM ai_usage_logs al
       JOIN users u ON al.user_id = u.id
-      WHERE al.created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour'
+      WHERE al.created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
       ORDER BY al.created_at DESC
       LIMIT 10`
     );

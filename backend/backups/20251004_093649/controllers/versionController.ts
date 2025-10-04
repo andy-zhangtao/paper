@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
 import * as aiService from '../services/aiService';
 
@@ -25,7 +24,7 @@ export const createVersion = async (req: AuthRequest, res: Response) => {
     }
 
     // 检查论文是否属于当前用户
-    const [papers] = await query(pool, 
+    const [papers] = await pool.query(
       'SELECT id, title FROM papers WHERE id = ? AND user_id = ?',
       [paperId, userId]
     );
@@ -41,7 +40,7 @@ export const createVersion = async (req: AuthRequest, res: Response) => {
     }
 
     // 获取上一个版本用于生成变更摘要
-    const [lastVersion] = await query(pool, 
+    const [lastVersion] = await pool.query(
       `SELECT content FROM paper_versions
        WHERE paper_id = ?
        ORDER BY created_at DESC
@@ -64,7 +63,7 @@ export const createVersion = async (req: AuthRequest, res: Response) => {
     const versionId = uuidv4();
     const now = new Date();
 
-    await query(pool, 
+    await pool.query(
       `INSERT INTO paper_versions (id, paper_id, content, change_summary, is_manual, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [versionId, paperId, JSON.stringify(content), changeSummary, manual ? 1 : 0, now]
@@ -99,7 +98,7 @@ export const getVersions = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
 
     // 检查论文是否属于当前用户
-    const [papers] = await query(pool, 
+    const [papers] = await pool.query(
       'SELECT id FROM papers WHERE id = ? AND user_id = ?',
       [paperId, userId]
     );
@@ -115,7 +114,7 @@ export const getVersions = async (req: AuthRequest, res: Response) => {
     }
 
     // 查询版本列表
-    const [versions] = await query(pool, 
+    const [versions] = await pool.query(
       `SELECT id, change_summary, is_manual, created_at
        FROM paper_versions
        WHERE paper_id = ?
@@ -159,7 +158,7 @@ export const compareVersions = async (req: AuthRequest, res: Response) => {
     }
 
     // 检查论文是否属于当前用户
-    const [papers] = await query(pool, 
+    const [papers] = await pool.query(
       'SELECT id FROM papers WHERE id = ? AND user_id = ?',
       [paperId, userId]
     );
@@ -175,7 +174,7 @@ export const compareVersions = async (req: AuthRequest, res: Response) => {
     }
 
     // 获取两个版本的内容
-    const [versions] = await query(pool, 
+    const [versions] = await pool.query(
       `SELECT id, content FROM paper_versions
        WHERE paper_id = ? AND id IN (?, ?)`,
       [paperId, from, to]
@@ -227,7 +226,7 @@ export const restoreVersion = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
 
     // 检查论文是否属于当前用户
-    const [papers] = await query(pool, 
+    const [papers] = await pool.query(
       'SELECT id FROM papers WHERE id = ? AND user_id = ?',
       [paperId, userId]
     );
@@ -243,7 +242,7 @@ export const restoreVersion = async (req: AuthRequest, res: Response) => {
     }
 
     // 获取版本内容
-    const [versions] = await query(pool, 
+    const [versions] = await pool.query(
       'SELECT content FROM paper_versions WHERE id = ? AND paper_id = ?',
       [versionId, paperId]
     );
@@ -262,7 +261,7 @@ export const restoreVersion = async (req: AuthRequest, res: Response) => {
 
     // 更新论文内容
     const now = new Date();
-    await query(pool, 
+    await pool.query(
       'UPDATE papers SET content = ?, updated_at = ? WHERE id = ?',
       [JSON.stringify(versionContent), now, paperId]
     );

@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
 import { deductCredits } from './creditsController';
 import * as aiService from '../services/aiService';
@@ -27,7 +26,7 @@ export const createDiscussion = async (req: AuthRequest, res: Response) => {
     }
 
     // 检查论文是否属于当前用户
-    const [papers] = await query(pool, 
+    const [papers] = await pool.query(
       'SELECT id FROM papers WHERE id = ? AND user_id = ?',
       [paperId, userId]
     );
@@ -69,7 +68,7 @@ export const createDiscussion = async (req: AuthRequest, res: Response) => {
     const discussionId = uuidv4();
     const now = new Date();
 
-    await query(pool, 
+    await pool.query(
       `INSERT INTO discussions (id, paper_id, user_id, question, context_text, ai_reply, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [discussionId, paperId, userId, question, context_text || null, aiReply, now]
@@ -117,7 +116,7 @@ export const getDiscussions = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
 
     // 检查论文是否属于当前用户
-    const [papers] = await query(pool, 
+    const [papers] = await pool.query(
       'SELECT id FROM papers WHERE id = ? AND user_id = ?',
       [paperId, userId]
     );
@@ -133,7 +132,7 @@ export const getDiscussions = async (req: AuthRequest, res: Response) => {
     }
 
     // 查询讨论列表
-    const [discussions] = await query(pool, 
+    const [discussions] = await pool.query(
       `SELECT id, question, ai_reply, created_at
        FROM discussions
        WHERE paper_id = ?

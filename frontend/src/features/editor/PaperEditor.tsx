@@ -1,8 +1,8 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { paperCreationApi } from '@/lib/api'
-import { Download, Save } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Download, Save, ChevronDown } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { ChapterCard } from './ChapterCard'
 import { useChapterGenerate } from './useChapterGenerate'
 
@@ -25,6 +25,8 @@ export const PaperEditor = () => {
   const [generatingChapter, setGeneratingChapter] = useState<number | null>(null)
   const [contentPromptId, setContentPromptId] = useState<string | null>(null)
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(true)
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
   const { generateChapter } = useChapterGenerate()
 
   // 检测调试模式
@@ -67,6 +69,20 @@ export const PaperEditor = () => {
     }
 
     fetchContentPrompt()
+  }, [])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setIsExportMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
   }, [])
 
   // 保存数据到 localStorage
@@ -155,8 +171,10 @@ export const PaperEditor = () => {
     })
   }
 
+  const getSafeFileName = (topic: string) => topic.replace(/[\\/:*?"<>|]/g, '_')
+
   // 导出为 Markdown
-  const handleExport = () => {
+  const handleExportMarkdown = () => {
     if (!paperData) return
 
     let markdown = `# ${paperData.topic}\n\n`
@@ -173,7 +191,81 @@ export const PaperEditor = () => {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${paperData.topic}.md`
+    link.download = `${getSafeFileName(paperData.topic)}.md`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // 导出为 DOCX
+  const handleExportDocx = async () => {
+    if (!paperData) return
+
+    const { Document, HeadingLevel, Packer, Paragraph, TextRun } = await import('docx')
+    type DocxParagraph = InstanceType<typeof Paragraph>
+
+    const doc = new Document({
+      sections: [
+        {
+          children: [
+            new Paragraph({
+              text: paperData.topic,
+              heading: HeadingLevel.TITLE,
+            }),
+            ...paperData.chapters.flatMap((chapter) => {
+              const paragraphs: DocxParagraph[] = []
+
+              paragraphs.push(
+                new Paragraph({
+                  text: chapter.heading,
+                  heading: HeadingLevel.HEADING_1,
+                }),
+              )
+
+              if (chapter.summary) {
+                paragraphs.push(
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: chapter.summary,
+                        italics: true,
+                        color: '6b7280',
+                      }),
+                    ],
+                  }),
+                )
+              }
+
+              const content = chapter.content.trim().length > 0 ? chapter.content : '[待生成内容]'
+              const lines = content.split(/\r?\n/)
+
+              if (lines.length === 0) {
+                paragraphs.push(new Paragraph(' '))
+              } else {
+                for (const line of lines) {
+                  paragraphs.push(
+                    new Paragraph({
+                      children: [
+                        new TextRun({
+                          text: line || ' ',
+                        }),
+                      ],
+                    }),
+                  )
+                }
+              }
+
+              return [...paragraphs, new Paragraph(' ')]
+            }),
+          ],
+        },
+      ],
+    })
+
+    const blob = await Packer.toBlob(doc)
+    const url = URL.createObjectURL(blob)
+    const link = window.document.createElement('a')
+    link.href = url
+    link.download = `${getSafeFileName(paperData.topic)}.docx`
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -234,10 +326,40 @@ export const PaperEditor = () => {
                 <Save className="mr-1 h-4 w-4" />
                 保存
               </Button>
-              <Button size="sm" onClick={handleExport}>
-                <Download className="mr-1 h-4 w-4" />
-                导出 Markdown
-              </Button>
+              <div className="relative" ref={exportMenuRef}>
+                <Button
+                  size="sm"
+                  onClick={() => setIsExportMenuOpen((prev) => !prev)}
+                  aria-haspopup="menu"
+                  aria-expanded={isExportMenuOpen}
+                >
+                  <Download className="mr-1 h-4 w-4" />
+                  导出
+                  <ChevronDown className="ml-1 h-4 w-4" />
+                </Button>
+                {isExportMenuOpen && (
+                  <div className="absolute right-0 z-20 mt-2 w-40 overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg">
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                      onClick={() => {
+                        setIsExportMenuOpen(false)
+                        handleExportMarkdown()
+                      }}
+                    >
+                      Markdown (.md)
+                    </button>
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                      onClick={() => {
+                        setIsExportMenuOpen(false)
+                        void handleExportDocx()
+                      }}
+                    >
+                      Word (.docx)
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -271,7 +393,7 @@ export const PaperEditor = () => {
               <li>点击章节标题可展开/折叠内容</li>
               <li>在输入框填写生成要求（可选），点击「生成」按钮即可让 AI 创作内容</li>
               <li>生成的内容可直接编辑修改，所有更改会自动保存到本地</li>
-              <li>完成后点击「导出 Markdown」下载论文文件</li>
+              <li>完成后点击右上角「导出」选择所需格式下载论文</li>
             </ul>
           </CardContent>
         </Card>

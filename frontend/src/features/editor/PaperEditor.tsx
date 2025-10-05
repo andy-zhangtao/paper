@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { paperCreationApi } from '@/lib/api'
 import { Download, Save } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ChapterCard } from './ChapterCard'
@@ -22,7 +23,12 @@ export const PaperEditor = () => {
   const [paperData, setPaperData] = useState<PaperData | null>(null)
   const [expandedChapters, setExpandedChapters] = useState<Record<number, boolean>>({})
   const [generatingChapter, setGeneratingChapter] = useState<number | null>(null)
+  const [contentPromptId, setContentPromptId] = useState<string | null>(null)
+  const [isLoadingPrompt, setIsLoadingPrompt] = useState(true)
   const { generateChapter } = useChapterGenerate()
+
+  // 检测调试模式
+  const isDebugMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === 'true'
 
   // 从 localStorage 加载数据
   useEffect(() => {
@@ -37,6 +43,30 @@ export const PaperEditor = () => {
         console.error('加载论文数据失败:', error)
       }
     }
+  }, [])
+
+  // 获取 content 阶段的系统提示词
+  useEffect(() => {
+    const fetchContentPrompt = async () => {
+      setIsLoadingPrompt(true)
+      try {
+        const response = await paperCreationApi.getPrompts('content')
+        const contentStage = response.stages.find((stage) => stage.code === 'content')
+        const systemPrompts = contentStage?.prompts.filter((p) => p.scope === 'system') ?? []
+
+        if (systemPrompts.length > 0) {
+          setContentPromptId(systemPrompts[0].id)
+        } else {
+          console.error('未找到 content 阶段的系统提示词')
+        }
+      } catch (error) {
+        console.error('加载提示词失败:', error)
+      } finally {
+        setIsLoadingPrompt(false)
+      }
+    }
+
+    fetchContentPrompt()
   }, [])
 
   // 保存数据到 localStorage
@@ -56,6 +86,12 @@ export const PaperEditor = () => {
   const handleGenerateChapter = async (index: number, instruction?: string) => {
     if (!paperData || generatingChapter !== null) return
 
+    // 检查是否有 promptId
+    if (!contentPromptId) {
+      alert('提示词加载中，请稍候...')
+      return
+    }
+
     setGeneratingChapter(index)
     setExpandedChapters((prev) => ({ ...prev, [index]: true })) // 自动展开
 
@@ -72,6 +108,7 @@ export const PaperEditor = () => {
           outline: paperData.outline,
           currentChapterIndex: index,
           previousChapters,
+          promptId: contentPromptId,
         },
         instruction,
         (chunk) => {
@@ -149,15 +186,21 @@ export const PaperEditor = () => {
     }
   }
 
-  if (!paperData) {
+  if (!paperData || isLoadingPrompt) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <Card className="w-96">
           <CardContent className="p-6 text-center">
-            <p className="text-gray-600">未找到论文数据，请先完成大纲生成。</p>
-            <Button className="mt-4" onClick={() => window.history.back()}>
-              返回上一步
-            </Button>
+            {!paperData ? (
+              <>
+                <p className="text-gray-600">未找到论文数据，请先完成大纲生成。</p>
+                <Button className="mt-4" onClick={() => window.history.back()}>
+                  返回上一步
+                </Button>
+              </>
+            ) : (
+              <p className="text-gray-600">加载提示词配置中...</p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -169,6 +212,13 @@ export const PaperEditor = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      {/* 调试模式提示 */}
+      {isDebugMode && (
+        <div className="bg-yellow-100 border-b border-yellow-300 px-6 py-2 text-center text-sm text-yellow-800">
+          🐛 调试模式已启用 - 使用模拟数据 | 移除 URL 参数 <code className="px-1 bg-yellow-200">?debug=true</code> 退出
+        </div>
+      )}
+
       {/* 顶部标题栏 */}
       <div className="sticky top-0 z-10 border-b bg-white shadow-sm">
         <div className="mx-auto max-w-5xl px-6 py-4">

@@ -1,5 +1,5 @@
 export type PromptScope = 'system' | 'user'
-export type PaperCreationStageCode = 'idea' | 'outline'
+export type PaperCreationStageCode = 'idea' | 'outline' | 'content'
 
 export interface PromptTemplateSummary {
   id: string

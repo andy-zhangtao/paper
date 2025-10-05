@@ -29,6 +29,10 @@ const STAGE_FALLBACK_INFO: Record<CreationStage, { title: string; description: s
     title: '生成大纲',
     description: '梳理章节结构与核心逻辑',
   },
+  content: {
+    title: '填充内容',
+    description: '生成章节正文内容',
+  },
 }
 
 const STEP_ORDER: Step[] = ['idea', 'outline', 'editor']
@@ -36,6 +40,7 @@ const STEP_ORDER: Step[] = ['idea', 'outline', 'editor']
 const STEP_TITLES: Record<Step, string> = {
   idea: '选择创意',
   outline: '生成大纲',
+  content: '填充内容',
   editor: '编辑正文',
 }
 
@@ -44,6 +49,8 @@ const STEP_INTRO_MESSAGES: Record<Step, string> = {
     '你好！我是你的AI写作助手。让我们一起创作一篇优质论文吧！\n\n**第一步：选择创意**\n\n请告诉我：\n1. 你想写什么主题的论文？\n2. 你的研究方向是什么？\n3. 有什么特定的角度或想法吗？',
   outline:
     '**第二步：生成大纲**\n\n现在我将为你生成详细的论文大纲。你对大纲有什么具体要求吗？（如章节数量、重点内容等）\n\n如果没有特殊要求，请直接回复「生成大纲」。',
+  content:
+    '**第三步：填充内容**\n\n现在为每个章节生成正文内容。',
   editor:
     '**进入编辑器**\n\n已为你整理章节大纲，点击任意章节即可自动生成正文，也可以手动编辑。编辑完成后可导出Markdown。',
 }
@@ -51,16 +58,19 @@ const STEP_INTRO_MESSAGES: Record<Step, string> = {
 const STEP_NEXT_LABEL: Record<CreationStage, string> = {
   idea: '生成论文大纲',
   outline: '进入编辑正文',
+  content: '进入编辑器',
 }
 
 const STEP_RESULT_TITLES: Record<CreationStage, string> = {
   idea: '创意草稿预览',
   outline: '论文大纲预览',
+  content: '内容预览',
 }
 
 const STEP_QUICK_REPLIES: Partial<Record<CreationStage, string[]>> = {
   idea: ['我想写关于人工智能的论文', '研究方向是教育科技', '帮我提供几个创新的论文选题'],
   outline: ['生成一个标准五章大纲', '突出研究方法部分', '请增加相关工作章节'],
+  content: [],
 }
 
 interface StatusCardProps {
@@ -281,13 +291,42 @@ export const PaperCreationWizard = () => {
   const { state: paperState, updateState, resetState } = usePaperCreationState()
   const assistantMessageIndexRef = useRef<number | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
-  const [step, setStep] = useState<Step>('idea')
+
+  // 调试模式：通过 URL 参数 ?debug=true 直接进入编辑器
+  const isDebugMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === 'true'
+  const [step, setStep] = useState<Step>(isDebugMode ? 'editor' : 'idea')
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
       content: STEP_INTRO_MESSAGES.idea,
     },
   ])
+
+  // 调试模式：初始化模拟数据
+  useEffect(() => {
+    if (isDebugMode && typeof window !== 'undefined') {
+      const mockPaperData = {
+        topic: '人工智能在教育领域的应用研究',
+        outline: [
+          { heading: '第一章 绪论', summary: '介绍研究背景、意义和研究目标' },
+          { heading: '第二章 文献综述', summary: '总结国内外相关研究成果' },
+          { heading: '第三章 研究方法', summary: '阐述研究方法和技术路线' },
+          { heading: '第四章 实验与分析', summary: '展示实验结果并进行分析' },
+          { heading: '第五章 结论与展望', summary: '总结研究成果并提出未来方向' },
+        ],
+        chapters: [
+          { heading: '第一章 绪论', summary: '介绍研究背景、意义和研究目标', content: '' },
+          { heading: '第二章 文献综述', summary: '总结国内外相关研究成果', content: '' },
+          { heading: '第三章 研究方法', summary: '阐述研究方法和技术路线', content: '' },
+          { heading: '第四章 实验与分析', summary: '展示实验结果并进行分析', content: '' },
+          { heading: '第五章 结论与展望', summary: '总结研究成果并提出未来方向', content: '' },
+        ],
+        createdAt: new Date().toISOString(),
+      }
+      localStorage.setItem('paper-editor-data', JSON.stringify(mockPaperData))
+      console.log('🐛 调试模式：已生成模拟论文数据')
+    }
+  }, [isDebugMode])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [generatedIdea, setGeneratedIdea] = useState('')
@@ -306,12 +345,14 @@ export const PaperCreationWizard = () => {
   const [selectedPromptIds, setSelectedPromptIds] = useState<Record<CreationStage, string | null>>({
     idea: null,
     outline: null,
+    content: null,
   })
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
   const [collapsedPreviewStages, setCollapsedPreviewStages] = useState<Record<CreationStage, boolean>>({
     idea: false,
     outline: false,
+    content: false,
   })
 
   const currentStage = step === 'editor' ? null : step
@@ -323,6 +364,7 @@ export const PaperCreationWizard = () => {
   const stageResults: Record<CreationStage, string> = {
     idea: generatedIdea,
     outline: generatedOutline,
+    content: '',
   }
   const currentStageResult = currentStage ? stageResults[currentStage] : ''
   const hasResultForCurrentStage = currentStage ? Boolean(currentStageResult) : false

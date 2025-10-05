@@ -6,6 +6,7 @@ interface ChapterContext {
   outline: Array<{ heading: string; summary?: string }>
   currentChapterIndex: number
   previousChapters: Array<{ heading: string; content: string }>
+  promptId: string
 }
 
 export const useChapterGenerate = () => {
@@ -54,12 +55,12 @@ export const useChapterGenerate = () => {
 
       const response = await paperCreationApi.chatStream(
         {
-          stage: 'outline', // 复用 outline 阶段的提示词（后续可以新增 content 阶段）
-          promptId: 'default', // 使用默认提示词
+          stage: 'content', // 使用 content 阶段的提示词
+          promptId: context.promptId, // 使用系统提示词
           message: userMessage,
           history: [],
           stateSnapshot: {
-            stage: 'outline',
+            stage: 'content',
             topic: context.topic,
             outline: context.outline,
             confidence: 1,

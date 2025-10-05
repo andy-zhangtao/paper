@@ -1,26 +1,24 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
-import { Send, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Input } from '@/components/ui/input'
 import { paperCreationApi } from '@/lib/api'
 import type {
-  PaperCreationStageCode,
-  PromptTemplateSummary,
   PaperCreationChatMessage,
+  PaperCreationStageCode,
   PaperCreationState,
-  PaperCreationStateOutlineItem,
-  PaperCreationContentSection,
+  PromptTemplateSummary,
 } from '@/types/prompt'
+import { Loader2, Send, Sparkles } from 'lucide-react'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { PaperEditor } from './PaperEditor'
 import { usePaperCreationState } from './usePaperCreationState'
 
 type CreationStage = PaperCreationStageCode
+const CREATION_STAGES: CreationStage[] = ['idea', 'outline']
 type Step = CreationStage | 'editor'
 type Message = PaperCreationChatMessage
-
-const CREATION_STAGES: CreationStage[] = ['idea', 'outline', 'content']
 
 const STAGE_FALLBACK_INFO: Record<CreationStage, { title: string; description: string | null }> = {
   idea: {
@@ -31,18 +29,13 @@ const STAGE_FALLBACK_INFO: Record<CreationStage, { title: string; description: s
     title: '生成大纲',
     description: '梳理章节结构与核心逻辑',
   },
-  content: {
-    title: '填充内容',
-    description: '扩展正文细节，完善段落内容',
-  },
 }
 
-const STEP_ORDER: Step[] = ['idea', 'outline', 'content', 'editor']
+const STEP_ORDER: Step[] = ['idea', 'outline', 'editor']
 
 const STEP_TITLES: Record<Step, string> = {
   idea: '选择创意',
   outline: '生成大纲',
-  content: '填充内容',
   editor: '编辑正文',
 }
 
@@ -51,28 +44,23 @@ const STEP_INTRO_MESSAGES: Record<Step, string> = {
     '你好！我是你的AI写作助手。让我们一起创作一篇优质论文吧！\n\n**第一步：选择创意**\n\n请告诉我：\n1. 你想写什么主题的论文？\n2. 你的研究方向是什么？\n3. 有什么特定的角度或想法吗？',
   outline:
     '**第二步：生成大纲**\n\n现在我将为你生成详细的论文大纲。你对大纲有什么具体要求吗？（如章节数量、重点内容等）\n\n如果没有特殊要求，请直接回复「生成大纲」。',
-  content:
-    '**第三步：填充内容**\n\n接下来我将为每个章节生成详细内容。你希望我：\n\n1. 自动生成所有章节内容\n2. 逐章节生成，你可以针对每章提出修改意见\n\n请告诉我你的选择，或直接回复「开始生成」。',
   editor:
-    '**第四步：进入编辑器**\n\n已为你整理章节大纲，点击任意章节即可自动生成正文，也可以手动编辑。编辑完成后可导出Markdown。',
+    '**进入编辑器**\n\n已为你整理章节大纲，点击任意章节即可自动生成正文，也可以手动编辑。编辑完成后可导出Markdown。',
 }
 
 const STEP_NEXT_LABEL: Record<CreationStage, string> = {
   idea: '生成论文大纲',
-  outline: '进入正文生成',
-  content: '进入编辑器',
+  outline: '进入编辑正文',
 }
 
 const STEP_RESULT_TITLES: Record<CreationStage, string> = {
   idea: '创意草稿预览',
   outline: '论文大纲预览',
-  content: '正文内容预览',
 }
 
 const STEP_QUICK_REPLIES: Partial<Record<CreationStage, string[]>> = {
   idea: ['我想写关于人工智能的论文', '研究方向是教育科技', '帮我提供几个创新的论文选题'],
   outline: ['生成一个标准五章大纲', '突出研究方法部分', '请增加相关工作章节'],
-  content: ['逐章节生成内容', '先写引言部分', '补充实验与结果章节'],
 }
 
 interface StatusCardProps {
@@ -304,7 +292,6 @@ export const PaperCreationWizard = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [generatedIdea, setGeneratedIdea] = useState('')
   const [generatedOutline, setGeneratedOutline] = useState('')
-  const [generatedContent, setGeneratedContent] = useState('')
   const [promptData, setPromptData] = useState<Record<CreationStage, StagePromptInfo>>(() => {
     const initial = {} as Record<CreationStage, StagePromptInfo>
     CREATION_STAGES.forEach((stage) => {
@@ -319,14 +306,12 @@ export const PaperCreationWizard = () => {
   const [selectedPromptIds, setSelectedPromptIds] = useState<Record<CreationStage, string | null>>({
     idea: null,
     outline: null,
-    content: null,
   })
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
   const [collapsedPreviewStages, setCollapsedPreviewStages] = useState<Record<CreationStage, boolean>>({
     idea: false,
     outline: false,
-    content: false,
   })
 
   const currentStage = step === 'editor' ? null : step
@@ -338,16 +323,9 @@ export const PaperCreationWizard = () => {
   const stageResults: Record<CreationStage, string> = {
     idea: generatedIdea,
     outline: generatedOutline,
-    content: generatedContent,
   }
   const currentStageResult = currentStage ? stageResults[currentStage] : ''
-  const contentSections = paperState?.contentSections ?? []
-  const contentReady = Boolean(paperState?.contentApproved && contentSections.length > 0)
-  const hasResultForCurrentStage = currentStage
-    ? currentStage === 'content'
-      ? contentReady
-      : Boolean(currentStageResult)
-    : false
+  const hasResultForCurrentStage = currentStage ? Boolean(currentStageResult) : false
 
   useEffect(() => {
     return () => {
@@ -422,7 +400,8 @@ export const PaperCreationWizard = () => {
     const history = messages.map((item) => ({ role: item.role, content: item.content }))
 
     setMessages((prev) => {
-      const next = [...prev, userMessage, { role: 'assistant', content: '' }]
+      const assistantPlaceholder: Message = { role: 'assistant', content: '' }
+      const next: Message[] = [...prev, userMessage, assistantPlaceholder]
       assistantMessageIndexRef.current = next.length - 1
       return next
     })
@@ -487,8 +466,6 @@ export const PaperCreationWizard = () => {
         setGeneratedIdea(reply)
       } else if (stageForRequest === 'outline') {
         setGeneratedOutline(reply)
-      } else if (stageForRequest === 'content') {
-        setGeneratedContent(reply)
       }
     } catch (error) {
       if (error instanceof Error && error.message === '请求已被取消') {
@@ -649,34 +626,23 @@ export const PaperCreationWizard = () => {
       setStep('outline')
       appendIntroForStep('outline')
     } else if (step === 'outline') {
-      setStep('content')
-      appendIntroForStep('content')
-    } else if (step === 'content') {
+      // 保存数据到 localStorage
+      if (paperState && paperState.outline) {
+        const paperData = {
+          topic: paperState.topic || '未命名论文',
+          outline: paperState.outline,
+          chapters: paperState.outline.map((item) => ({
+            heading: item.heading,
+            summary: item.summary || '',
+            content: '',
+          })),
+          createdAt: new Date().toISOString(),
+        }
+        localStorage.setItem('paper-editor-data', JSON.stringify(paperData))
+      }
       setStep('editor')
       appendIntroForStep('editor')
     }
-  }
-
-  const getFinalMarkdown = () => {
-    if (paperState?.contentSections?.length) {
-      return paperState.contentSections
-        .map((section) => `## ${section.heading}\n\n${section.content}`)
-        .join('\n\n')
-    }
-
-    if (generatedContent) {
-      return generatedContent
-    }
-
-    if (generatedOutline) {
-      return generatedOutline
-    }
-
-    if (generatedIdea) {
-      return generatedIdea
-    }
-
-    return '# 论文标题\n\n内容生成中...'
   }
 
   const handleTogglePreview = (stage: CreationStage) => {
@@ -684,6 +650,11 @@ export const PaperCreationWizard = () => {
       ...prev,
       [stage]: !prev[stage],
     }))
+  }
+
+  // 如果进入编辑器模式，直接渲染 PaperEditor
+  if (step === 'editor') {
+    return <PaperEditor />
   }
 
   return (
@@ -732,9 +703,8 @@ export const PaperCreationWizard = () => {
       {/* 主内容区 */}
       <div className="flex-1 overflow-hidden flex">
         <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
-          {step !== 'preview' ? (
-            /* 对话式交互界面 */
-            <div className="flex-1 min-h-0 flex flex-col max-w-4xl mx-auto w-full">
+          {/* 对话式交互界面 */}
+          <div className="flex-1 min-h-0 flex flex-col max-w-4xl mx-auto w-full">
               {currentStage && (
                 <div className="px-6 pt-6 flex-none">
                   <Card className="border border-purple-100 shadow-sm">
@@ -876,51 +846,7 @@ export const PaperCreationWizard = () => {
                 ) : null}
               </div>
             </div>
-            </div>
-          ) : (
-            /* Markdown 预览界面 */
-            <div className="flex-1 overflow-y-auto">
-              <div className="max-w-4xl mx-auto p-8">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>论文预览</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="prose prose-lg max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {getFinalMarkdown()}
-                      </ReactMarkdown>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* 操作按钮 */}
-                <div className="mt-6 flex gap-4 justify-center">
-                  {previousStep && (
-                    <Button variant="outline" onClick={handleGoBack}>
-                      上一步
-                    </Button>
-                  )}
-                  <Button variant="outline" onClick={() => {
-                    setStep('idea')
-                    setMessages([{
-                      role: 'assistant',
-                      content: '让我们重新开始创作一篇新论文！请告诉我你的研究主题。'
-                    }])
-                    resetState()
-                  }}>
-                    重新生成
-                  </Button>
-                  <Button variant="gradient">
-                    进入编辑器
-                  </Button>
-                  <Button variant="outline">
-                    导出 Markdown
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
         <StatusCard state={paperState} onReset={resetState} currentStage={step} />
       </div>

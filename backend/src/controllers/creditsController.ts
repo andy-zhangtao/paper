@@ -3,6 +3,13 @@ import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
 import { execute, query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
+import { getTokenToCreditRatio } from '../services/creditSettingsService';
+import {
+  formatCredit,
+  hasSufficientCredits,
+  normalizeTokenCount,
+  roundCredit,
+} from '../utils/creditMath';
 
 /**
  * 查询积分余额
@@ -11,9 +18,9 @@ export const getBalance = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
 
-    const [users] = await query<{ credits: number; is_vip: boolean | number }>(
+    const [users] = await query<{ credits: number; is_vip: boolean | number; credits_expire_at: Date | string | null }>(
       pool,
-      'SELECT credits, is_vip FROM users WHERE id = ?',
+      'SELECT credits, is_vip, credits_expire_at FROM users WHERE id = ?',
       [userId]
     );
 
@@ -28,12 +35,17 @@ export const getBalance = async (req: AuthRequest, res: Response) => {
     }
 
     const user = users[0];
+    const expiresAt = user.credits_expire_at ? new Date(user.credits_expire_at) : null;
+    const ratio = await getTokenToCreditRatio();
+    const credits = roundCredit(user.credits);
 
     return res.status(200).json({
       success: true,
       data: {
-        credits: user.credits,
+        credits,
         is_vip: Boolean(user.is_vip),
+        credits_expire_at: expiresAt ? expiresAt.toISOString() : null,
+        token_to_credit_ratio: ratio,
       },
     });
   } catch (error) {
@@ -82,11 +94,16 @@ export const getTransactions = async (req: AuthRequest, res: Response) => {
     );
 
     const total = countResult[0]?.total ?? 0;
+    const items = transactions.map((tx) => ({
+      ...tx,
+      amount: roundCredit(tx.amount),
+      balance_after: roundCredit(tx.balance_after),
+    }));
 
     return res.status(200).json({
       success: true,
       data: {
-        items: transactions,
+        items,
         pagination: {
           total,
           page,
@@ -113,43 +130,63 @@ export const getTransactions = async (req: AuthRequest, res: Response) => {
  * @param description 操作描述
  * @returns 扣除后的余额，如果积分不足返回null
  */
+export type DeductCreditsFailureReason = 'NOT_FOUND' | 'INSUFFICIENT' | 'EXPIRED';
+
+export interface DeductCreditsResult {
+  ok: boolean;
+  balance?: number;
+  reason?: DeductCreditsFailureReason;
+}
+
 export const deductCredits = async (
   userId: string,
   amount: number,
   description: string
-): Promise<number | null> => {
+): Promise<DeductCreditsResult> => {
   const connection = await pool.connect();
 
   try {
     await connection.query('BEGIN');
 
     // 查询当前余额
-    const [users] = await query<{ credits: number }>(
+    const [users] = await query<{ credits: number; credits_expire_at: Date | string | null }>(
       connection,
-      'SELECT credits FROM users WHERE id = ? FOR UPDATE',
+      'SELECT credits, credits_expire_at FROM users WHERE id = ? FOR UPDATE',
       [userId]
     );
 
     if (users.length === 0) {
       await connection.query('ROLLBACK');
-      return null;
+      return { ok: false, reason: 'NOT_FOUND' };
     }
 
-    const currentCredits = users[0].credits;
+    const currentCredits = roundCredit(users[0].credits);
+    const amountToDeduct = roundCredit(amount);
+    const expireAt = users[0].credits_expire_at ? new Date(users[0].credits_expire_at) : null;
+
+    if (expireAt && expireAt.getTime() < Date.now()) {
+      await connection.query('ROLLBACK');
+      return { ok: false, reason: 'EXPIRED' };
+    }
+
+    if (amountToDeduct <= 0) {
+      await connection.query('ROLLBACK');
+      return { ok: true, balance: currentCredits };
+    }
 
     // 检查余额是否足够
-    if (currentCredits < amount) {
+    if (!hasSufficientCredits(currentCredits, amountToDeduct)) {
       await connection.query('ROLLBACK');
-      return null;
+      return { ok: false, reason: 'INSUFFICIENT' };
     }
 
-    const newBalance = currentCredits - amount;
+    const newBalance = roundCredit(currentCredits - amountToDeduct);
 
     // 更新用户余额
     await execute(
       connection,
       'UPDATE users SET credits = ?, updated_at = ? WHERE id = ?',
-      [newBalance, new Date(), userId]
+      [formatCredit(newBalance), new Date(), userId]
     );
 
     // 记录流水
@@ -161,15 +198,15 @@ export const deductCredits = async (
         uuidv4(),
         userId,
         'consume',
-        -amount,
-        newBalance,
+        formatCredit(-amountToDeduct),
+        formatCredit(newBalance),
         description,
         new Date(),
       ]
     );
 
     await connection.query('COMMIT');
-    return newBalance;
+    return { ok: true, balance: newBalance };
   } catch (error) {
     await connection.query('ROLLBACK');
     throw error;
@@ -202,14 +239,15 @@ export const addCredits = async (
       [userId]
     );
 
-    const currentCredits = users.length > 0 ? users[0].credits : 0;
-    const newBalance = currentCredits + amount;
+    const currentCredits = users.length > 0 ? roundCredit(users[0].credits) : 0;
+    const amountToAdd = roundCredit(amount);
+    const newBalance = roundCredit(currentCredits + amountToAdd);
 
     // 更新用户余额
     await execute(
       connection,
       'UPDATE users SET credits = ?, updated_at = ? WHERE id = ?',
-      [newBalance, new Date(), userId]
+      [formatCredit(newBalance), new Date(), userId]
     );
 
     // 记录流水
@@ -221,8 +259,8 @@ export const addCredits = async (
         uuidv4(),
         userId,
         'recharge',
-        amount,
-        newBalance,
+        formatCredit(amountToAdd),
+        formatCredit(newBalance),
         description,
         new Date(),
       ]
@@ -236,4 +274,118 @@ export const addCredits = async (
   } finally {
     connection.release();
   }
+};
+
+export interface TokenUsageSummary {
+  totalTokens?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  serviceType?: string;
+  model?: string | null;
+  paperId?: string | null;
+}
+
+export interface TokenDeductionResult {
+  ok: boolean;
+  cost: number;
+  ratio: number;
+  remaining?: number;
+  reason?: DeductCreditsFailureReason;
+}
+
+export interface UserCreditStatus {
+  credits: number;
+  creditsExpireAt: Date | null;
+  isExpired: boolean;
+}
+
+export const getUserCreditStatus = async (userId: string): Promise<UserCreditStatus | null> => {
+  const [rows] = await query<{ credits: number; credits_expire_at: Date | string | null }>(
+    pool,
+    'SELECT credits, credits_expire_at FROM users WHERE id = ?',
+    [userId]
+  );
+
+  if (!rows || rows.length === 0) {
+    return null;
+  }
+
+  const expireAt = rows[0].credits_expire_at ? new Date(rows[0].credits_expire_at) : null;
+  const credits = roundCredit(rows[0].credits);
+
+  return {
+    credits,
+    creditsExpireAt: expireAt,
+    isExpired: Boolean(expireAt && expireAt.getTime() < Date.now()),
+  };
+};
+
+export const deductCreditsByTokens = async (
+  userId: string,
+  usage: TokenUsageSummary,
+  description: string
+): Promise<TokenDeductionResult> => {
+  const ratio = await getTokenToCreditRatio();
+
+  const promptTokens = normalizeTokenCount(usage.promptTokens);
+  const completionTokens = normalizeTokenCount(usage.completionTokens);
+  const reportedTotalTokens = normalizeTokenCount(usage.totalTokens);
+  const derivedTotalTokens = promptTokens + completionTokens;
+  const totalTokens = Math.max(reportedTotalTokens, derivedTotalTokens, 0);
+  const cost = roundCredit(totalTokens * ratio);
+
+  if (cost <= 0) {
+    const [users] = await query<{ credits: number }>(
+      pool,
+      'SELECT credits FROM users WHERE id = ?',
+      [userId]
+    );
+
+    return {
+      ok: true,
+      cost: 0,
+      ratio,
+      remaining: users[0] ? roundCredit(users[0].credits) : 0,
+    };
+  }
+
+  const deduction = await deductCredits(userId, cost, description);
+
+  if (!deduction.ok) {
+    return {
+      ok: false,
+      cost,
+      ratio,
+      reason: deduction.reason,
+    };
+  }
+
+  try {
+    await execute(
+      pool,
+      `INSERT INTO ai_usage_logs (id, user_id, paper_id, service_type, credits_consumed, input_tokens, output_tokens, model, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+      [
+        uuidv4(),
+        userId,
+        usage.paperId || null,
+        usage.serviceType || 'chat',
+        formatCredit(cost),
+        promptTokens,
+        completionTokens,
+        usage.model ?? null,
+        new Date(),
+      ]
+    );
+  } catch (error) {
+    console.error('记录AI使用日志失败:', error);
+    // 日志写入失败不影响主流程
+  }
+
+  return {
+    ok: true,
+    cost,
+    ratio,
+    remaining: roundCredit(deduction.balance ?? 0),
+  };
 };

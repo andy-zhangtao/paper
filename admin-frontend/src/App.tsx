@@ -3,6 +3,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import UsersPage from './pages/UsersPage';
 import PromptTemplatesPage from './pages/PromptTemplatesPage';
+import SettingsPage from './pages/SettingsPage';
 import AdminLayout from './layouts/AdminLayout';
 
 // 路由守卫组件
@@ -31,6 +32,7 @@ function App() {
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="prompt-templates" element={<PromptTemplatesPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

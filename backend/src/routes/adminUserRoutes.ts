@@ -4,7 +4,8 @@ import {
   getUserDetail,
   toggleUserStatus,
   rechargeCredits,
-  getUserTransactions
+  getUserTransactions,
+  updateUserCredits,
 } from '../controllers/adminUserController';
 import { adminAuthMiddleware } from '../middleware/adminAuth';
 
@@ -24,6 +25,9 @@ router.put('/:userId/status', toggleUserStatus);
 
 // 为用户充值积分
 router.post('/:userId/recharge', rechargeCredits);
+
+// 管理员直接设置积分与有效期
+router.put('/:userId/credits', updateUserCredits);
 
 // 获取用户积分流水
 router.get('/:userId/transactions', getUserTransactions);

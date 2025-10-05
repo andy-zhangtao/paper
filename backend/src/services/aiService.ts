@@ -17,6 +17,18 @@ const aiClient = axios.create({
 
 const DEFAULT_MODEL = OPENROUTER_CONFIG.modelName || AI_MODELS.default;
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+interface ChatCompletionResult {
+  content: string;
+  usage: TokenUsage;
+  model: string;
+}
+
 const PAPER_CREATION_ASSISTANT_PROMPT =
   '你是Paper AI论文写作助手。请在帮助用户的同时，根据对话判断核心信息，并按以下格式回应：\n' +
   '1. 先输出自然语言回答。\n' +
@@ -56,13 +68,10 @@ if (OPENROUTER_CONFIG.proxyUrl) {
   aiClient.defaults.httpsAgent = agent;
 }
 
-// 导出积分配置供其他模块使用
-export { AI_CREDITS_COST } from '../config/constants';
-
 /**
  * 调用OpenRouter API
  */
-async function callOpenRouter(messages: any[], model: string) {
+async function callOpenRouter(messages: any[], model: string): Promise<ChatCompletionResult> {
   try {
     const requestBody = {
       model,
@@ -75,7 +84,23 @@ async function callOpenRouter(messages: any[], model: string) {
 
     const response = await aiClient.post('/chat/completions', requestBody);
 
-    return response.data.choices[0].message.content;
+    const data = response.data || {};
+    const choiceContent = data.choices?.[0]?.message?.content ?? '';
+    const usage = data.usage || {};
+
+    const promptTokens = Number(usage.prompt_tokens) || 0;
+    const completionTokens = Number(usage.completion_tokens) || 0;
+    const totalTokens = Number(usage.total_tokens) || promptTokens + completionTokens;
+
+    return {
+      content: choiceContent,
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens,
+      },
+      model: data.model || model,
+    };
   } catch (error: any) {
     console.error('OpenRouter API调用错误:', error.response?.data || error.message);
     throw new Error('AI服务调用失败');
@@ -92,10 +117,11 @@ export async function polishText(text: string, type: 'grammar' | 'logic' | 'styl
     style: `请提升以下段落的学术风格，使用更正式、专业的表达方式：\n\n${text}`,
   };
 
-  const polished = await callOpenRouter([
+  const completion = await callOpenRouter([
     { role: 'system', content: '你是一个专业的学术论文润色助手，擅长优化中文学术论文的表达。' },
     { role: 'user', content: prompts[type] },
   ], DEFAULT_MODEL);
+  const polished = completion.content;
 
   // 简单的变更检测（实际应用中可以用diff算法）
   const changes = [
@@ -110,6 +136,8 @@ export async function polishText(text: string, type: 'grammar' | 'logic' | 'styl
     original: text,
     polished,
     changes,
+    usage: completion.usage,
+    model: completion.model,
   };
 }
 
@@ -137,23 +165,27 @@ export async function generateOutline(topic: string, paperType: 'research' | 're
   ]
 }`;
 
-  const result = await callOpenRouter([
+  const completion = await callOpenRouter([
     { role: 'system', content: '你是一个学术论文写作专家，擅长构建论文框架。' },
     { role: 'user', content: prompt },
   ], DEFAULT_MODEL);
 
   try {
     // 尝试解析JSON
-    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    const jsonMatch = completion.content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      return {
+        outline: JSON.parse(jsonMatch[0]),
+        usage: completion.usage,
+        model: completion.model,
+      };
     }
   } catch (e) {
     // 如果解析失败，返回默认结构
   }
 
   // 默认结构
-  return {
+  const fallbackOutline = {
     title: `${topic}研究`,
     sections: [
       { heading: '引言', subsections: ['研究背景', '研究意义', '研究目标'] },
@@ -162,6 +194,12 @@ export async function generateOutline(topic: string, paperType: 'research' | 're
       { heading: '结果与分析', subsections: ['主要发现', '深入分析', '讨论'] },
       { heading: '结论', subsections: ['研究总结', '局限性', '未来展望'] },
     ],
+  };
+
+  return {
+    outline: fallbackOutline,
+    usage: completion.usage,
+    model: completion.model,
   };
 }
 
@@ -189,21 +227,29 @@ export async function checkGrammar(text: string, level: 'basic' | 'standard' | '
 文本：
 ${text}`;
 
-  const result = await callOpenRouter([
+  const completion = await callOpenRouter([
     { role: 'system', content: '你是一个专业的中文语法检查助手。' },
     { role: 'user', content: prompt },
   ], DEFAULT_MODEL);
 
   try {
-    const jsonMatch = result.match(/\[[\s\S]*\]/);
+    const jsonMatch = completion.content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      return {
+        errors: JSON.parse(jsonMatch[0]),
+        usage: completion.usage,
+        model: completion.model,
+      };
     }
   } catch (e) {
     // 解析失败返回空数组
   }
 
-  return [];
+  return {
+    errors: [],
+    usage: completion.usage,
+    model: completion.model,
+  };
 }
 
 /**
@@ -235,30 +281,38 @@ export async function generateReferences(
   }
 ]`;
 
-  const result = await callOpenRouter([
+  const completion = await callOpenRouter([
     { role: 'system', content: '你是一个学术文献专家，熟悉各种引用格式。' },
     { role: 'user', content: prompt },
   ], AI_MODELS.premium);
 
   try {
-    const jsonMatch = result.match(/\[[\s\S]*\]/);
+    const jsonMatch = completion.content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      return {
+        references: JSON.parse(jsonMatch[0]),
+        usage: completion.usage,
+        model: completion.model,
+      };
     }
   } catch (e) {
     // 解析失败
   }
 
   // 返回示例文献
-  return [
-    {
-      authors: ['张三', '李四'],
-      title: `${topic}研究综述`,
-      year: 2024,
-      publisher: '中国学术期刊',
-      formatted: `张三, 李四. ${topic}研究综述[J]. 中国学术期刊, 2024.`,
-    },
-  ];
+  return {
+    references: [
+      {
+        authors: ['张三', '李四'],
+        title: `${topic}研究综述`,
+        year: 2024,
+        publisher: '中国学术期刊',
+        formatted: `张三, 李四. ${topic}研究综述[J]. 中国学术期刊, 2024.`,
+      },
+    ],
+    usage: completion.usage,
+    model: completion.model,
+  };
 }
 
 /**
@@ -274,10 +328,11 @@ export async function rewriteText(text: string, similarityThreshold: number) {
 原文：
 ${text}`;
 
-  const rewritten = await callOpenRouter([
+  const completion = await callOpenRouter([
     { role: 'system', content: '你是一个专业的学术写作改写助手，擅长用不同方式表达相同观点。' },
     { role: 'user', content: prompt },
   ], AI_MODELS.premium);
+  const rewritten = completion.content;
 
   // 简单模拟相似度计算（实际应用中需要用专业算法）
   const similarity = Math.random() * (similarityThreshold - 0.1) + 0.1;
@@ -286,6 +341,8 @@ ${text}`;
     original: text,
     rewritten,
     similarity: parseFloat(similarity.toFixed(2)),
+    usage: completion.usage,
+    model: completion.model,
   };
 }
 
@@ -293,7 +350,7 @@ ${text}`;
  * 生成讨论回复
  */
 export async function generateDiscussionReply(prompt: string) {
-  const reply = await callOpenRouter([
+  const completion = await callOpenRouter([
     {
       role: 'system',
       content: '你是一个专业的学术论文写作助手，擅长回答关于论文写作、结构、逻辑等方面的问题。回答要简洁、专业、有针对性。',
@@ -301,7 +358,11 @@ export async function generateDiscussionReply(prompt: string) {
     { role: 'user', content: prompt },
   ], DEFAULT_MODEL);
 
-  return reply;
+  return {
+    reply: completion.content,
+    usage: completion.usage,
+    model: completion.model,
+  };
 }
 
 /**
@@ -318,12 +379,12 @@ ${newContent.substring(0, 500)}...
 
 请只返回变更摘要，不要其他解释。`;
 
-  const summary = await callOpenRouter([
+  const completion = await callOpenRouter([
     { role: 'system', content: '你是一个文档版本对比助手。' },
     { role: 'user', content: prompt },
   ], DEFAULT_MODEL);
 
-  return summary.substring(0, 100); // 限制长度
+  return completion.content.substring(0, 100); // 限制长度
 }
 
 export interface ChatMessage {
@@ -350,6 +411,8 @@ export interface PaperCreationState {
 export interface PaperCreationChatResult {
   reply: string
   state?: PaperCreationState
+  usage: TokenUsage
+  model: string
 }
 
 export interface PaperCreationStreamCallbacks {
@@ -369,10 +432,9 @@ export async function chatCompletionStream(
     throw new Error('messages不能为空');
   }
 
-  const enhancedMessages = messages
-  if (useEnhancedFormat) {
-    const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
-  }
+  const enhancedMessages = useEnhancedFormat 
+    ? buildPaperCreationMessages(messages, stateSnapshot)
+    : messages
   
   console.log("enhancedMessages:", enhancedMessages)
   console.log("model:", model)
@@ -395,6 +457,7 @@ export async function chatCompletionStream(
   let buffer = ''
   let fullText = ''
   let emittedLength = 0
+  let streamUsage: TokenUsage | null = null
 
   const emitLatestVisibleText = () => {
     const stateIndex = fullText.indexOf('<STATE>')
@@ -435,6 +498,18 @@ export async function chatCompletionStream(
       if (content) {
         fullText += content.replace(/\r/g, '')
         emitLatestVisibleText()
+      }
+      // 捕获 usage 信息
+      if (parsed.usage) {
+        const usage = parsed.usage
+        const promptTokens = Number(usage.prompt_tokens) || 0
+        const completionTokens = Number(usage.completion_tokens) || 0
+        const totalTokens = Number(usage.total_tokens) || promptTokens + completionTokens
+        streamUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+        }
       }
     } catch (error) {
       console.warn('解析OpenRouter流数据失败:', error)
@@ -490,9 +565,19 @@ export async function chatCompletionStream(
       }
 
       const cleanReply = fullText.replace(/<STATE>[\s\S]*?<\/STATE>/, '').trim()
+      
+      // 如果流式响应没有提供 usage，则估算 token 数量
+      const finalUsage = streamUsage || {
+        promptTokens: Math.ceil(JSON.stringify(enhancedMessages).length / 4),
+        completionTokens: Math.ceil(fullText.length / 4),
+        totalTokens: Math.ceil((JSON.stringify(enhancedMessages).length + fullText.length) / 4),
+      }
+      
       const result: PaperCreationChatResult = {
         reply: cleanReply,
         state: parsedState,
+        usage: finalUsage,
+        model,
       }
 
       emittedLength = cleanReply.length
@@ -518,9 +603,10 @@ export async function chatCompletion(
 
   const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
 
-  const rawReply = await callOpenRouter(enhancedMessages, model)
+  const completion = await callOpenRouter(enhancedMessages, model)
+  const replyContent = completion.content
 
-  const stateMatch = rawReply.match(/<STATE>([\s\S]*?)<\/STATE>/)
+  const stateMatch = replyContent.match(/<STATE>([\s\S]*?)<\/STATE>/)
   let parsedState: PaperCreationState | undefined
   if (stateMatch) {
     const jsonText = stateMatch[1]
@@ -534,10 +620,12 @@ export async function chatCompletion(
     }
   }
 
-  const cleanReply = rawReply.replace(/<STATE>[\s\S]*?<\/STATE>/, '').trim()
+  const cleanReply = replyContent.replace(/<STATE>[\s\S]*?<\/STATE>/, '').trim()
 
   return {
     reply: cleanReply,
     state: parsedState,
+    usage: completion.usage,
+    model: completion.model,
   }
 }

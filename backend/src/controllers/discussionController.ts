@@ -3,9 +3,88 @@ import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
 import { query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
-import { deductCredits } from './creditsController';
+import {
+  TokenDeductionResult,
+  deductCreditsByTokens,
+  getUserCreditStatus,
+} from './creditsController';
 import * as aiService from '../services/aiService';
-import { AI_CREDITS_COST } from '../config/constants';
+
+function handleDeductionFailure(res: Response, deduction: TokenDeductionResult) {
+  if (deduction.ok) {
+    return;
+  }
+
+  if (deduction.reason === 'NOT_FOUND') {
+    res.status(404).json({
+      success: false,
+      error: {
+        code: 'USER_NOT_FOUND',
+        message: '用户不存在',
+      },
+    });
+    return;
+  }
+
+  const isExpired = deduction.reason === 'EXPIRED';
+
+  res.status(402).json({
+    success: false,
+    error: {
+      code: isExpired ? 'CREDITS_EXPIRED' : 'INSUFFICIENT_CREDITS',
+      message: isExpired ? '积分已过期，请联系管理员续期' : '积分不足，请充值',
+      details: {
+        required: deduction.cost,
+        ratio: deduction.ratio,
+      },
+    },
+  });
+}
+
+async function ensureCreditsActive(userId: string, res: Response) {
+  const status = await getUserCreditStatus(userId);
+
+  if (!status) {
+    res.status(404).json({
+      success: false,
+      error: {
+        code: 'USER_NOT_FOUND',
+        message: '用户不存在',
+      },
+    });
+    return null;
+  }
+
+  if (status.isExpired) {
+    res.status(402).json({
+      success: false,
+      error: {
+        code: 'CREDITS_EXPIRED',
+        message: '积分已过期，请联系管理员续期',
+        details: {
+          balance: status.credits,
+        },
+      },
+    });
+    return null;
+  }
+
+  if (status.credits <= 0) {
+    res.status(402).json({
+      success: false,
+      error: {
+        code: 'INSUFFICIENT_CREDITS',
+        message: '积分不足，请充值',
+        details: {
+          balance: status.credits,
+        },
+      },
+    });
+    return null;
+  }
+
+  return status;
+}
 
 /**
  * 提问(AI自动回答)
@@ -42,20 +121,8 @@ export const createDiscussion = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // 扣除积分
-    const newBalance = await deductCredits(userId, AI_CREDITS_COST.discussion, 'AI讨论');
-
-    if (newBalance === null) {
-      return res.status(402).json({
-        success: false,
-        error: {
-          code: 'INSUFFICIENT_CREDITS',
-          message: '积分不足，请充值',
-          details: {
-            required: AI_CREDITS_COST.discussion,
-          },
-        },
-      });
+    if (!(await ensureCreditsActive(userId, res))) {
+      return;
     }
 
     // 调用AI生成回答
@@ -65,6 +132,24 @@ export const createDiscussion = async (req: AuthRequest, res: Response) => {
 
     const aiReply = await aiService.generateDiscussionReply(prompt);
 
+    const deduction = await deductCreditsByTokens(
+      userId,
+      {
+        totalTokens: aiReply.usage.totalTokens,
+        promptTokens: aiReply.usage.promptTokens,
+        completionTokens: aiReply.usage.completionTokens,
+        serviceType: 'discussion',
+        model: aiReply.model,
+        paperId,
+      },
+      'AI讨论'
+    );
+
+    if (!deduction.ok) {
+      handleDeductionFailure(res, deduction);
+      return;
+    }
+
     // 保存讨论记录
     const discussionId = uuidv4();
     const now = new Date();
@@ -72,7 +157,7 @@ export const createDiscussion = async (req: AuthRequest, res: Response) => {
     await query(pool, 
       `INSERT INTO discussions (id, paper_id, user_id, question, context_text, ai_reply, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [discussionId, paperId, userId, question, context_text || null, aiReply, now]
+      [discussionId, paperId, userId, question, context_text || null, aiReply.reply, now]
     );
 
     return res.status(201).json({
@@ -80,8 +165,11 @@ export const createDiscussion = async (req: AuthRequest, res: Response) => {
       data: {
         id: discussionId,
         question,
-        ai_reply: aiReply,
-        credits_cost: AI_CREDITS_COST.discussion,
+        ai_reply: aiReply.reply,
+        credits_cost: deduction.cost,
+        credits_remaining: deduction.remaining,
+        token_usage: aiReply.usage,
+        token_to_credit_ratio: deduction.ratio,
         created_at: now.toISOString(),
       },
     });

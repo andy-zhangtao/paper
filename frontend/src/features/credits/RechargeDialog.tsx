@@ -1,12 +1,12 @@
-import { useState } from 'react'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog'
+import { useState } from 'react'
 import { RechargeCard } from './RechargeCard'
 
 interface RechargePackage {
@@ -27,9 +27,10 @@ const packages: RechargePackage[] = [
 interface RechargeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onSuccess?: () => void
 }
 
-export const RechargeDialog = ({ open, onOpenChange }: RechargeDialogProps) => {
+export const RechargeDialog = ({ open, onOpenChange, onSuccess }: RechargeDialogProps) => {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isPaying, setIsPaying] = useState(false)
 
@@ -44,6 +45,11 @@ export const RechargeDialog = ({ open, onOpenChange }: RechargeDialogProps) => {
     setIsPaying(false)
     onOpenChange(false)
     alert(`支付成功！获得 ${selectedPackage.amount + selectedPackage.bonus} 积分`)
+    
+    // 调用成功回调刷新积分
+    if (onSuccess) {
+      onSuccess()
+    }
   }
 
   return (

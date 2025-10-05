@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) NOT NULL UNIQUE,
   password VARCHAR(255) NOT NULL,
   phone VARCHAR(20),
-  credits INTEGER NOT NULL DEFAULT 0,
+  credits NUMERIC(14,4) NOT NULL DEFAULT 0,
+  credits_expire_at TIMESTAMP,
+  is_vip BOOLEAN NOT NULL DEFAULT FALSE,
   status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'banned')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -25,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_status ON users(status);
+CREATE INDEX idx_users_is_vip ON users(is_vip);
 
 CREATE TRIGGER update_users_updated_at
   BEFORE UPDATE ON users
@@ -55,9 +58,9 @@ CREATE TRIGGER update_papers_updated_at
 CREATE TABLE IF NOT EXISTS credit_transactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type VARCHAR(20) NOT NULL CHECK (type IN ('recharge', 'consume', 'refund', 'bonus')),
-  amount INTEGER NOT NULL,
-  balance_after INTEGER NOT NULL,
+  type VARCHAR(20) NOT NULL CHECK (type IN ('recharge', 'consume', 'refund', 'bonus', 'adjustment')),
+  amount NUMERIC(14,4) NOT NULL,
+  balance_after NUMERIC(14,4) NOT NULL,
   description VARCHAR(500),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -84,7 +87,7 @@ CREATE TABLE IF NOT EXISTS recharge_orders (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   package_id UUID NOT NULL REFERENCES recharge_packages(id),
   amount DECIMAL(10,2) NOT NULL,
-  credits INTEGER NOT NULL,
+  credits NUMERIC(14,4) NOT NULL,
   status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'success', 'failed', 'refunded')),
   payment_method VARCHAR(50),
   payment_id VARCHAR(255),
@@ -101,13 +104,31 @@ CREATE TRIGGER update_recharge_orders_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
+-- 5.1 积分设置表
+CREATE TABLE IF NOT EXISTS credit_settings (
+  id SMALLINT PRIMARY KEY DEFAULT 1,
+  token_to_credit_ratio NUMERIC(10,4) NOT NULL DEFAULT 1.0,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER update_credit_settings_updated_at
+  BEFORE UPDATE ON credit_settings
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+INSERT INTO credit_settings (id, token_to_credit_ratio)
+VALUES (1, 1.0)
+ON CONFLICT (id) DO NOTHING;
+
 -- 6. AI使用记录表
 CREATE TABLE IF NOT EXISTS ai_usage_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   paper_id UUID REFERENCES papers(id) ON DELETE SET NULL,
-  service_type VARCHAR(20) NOT NULL CHECK (service_type IN ('polish', 'translate', 'expand', 'summarize', 'chat')),
-  credits_consumed INTEGER NOT NULL,
+  service_type VARCHAR(20) NOT NULL CHECK (service_type IN (
+    'polish', 'translate', 'expand', 'summarize', 'chat', 'outline', 'grammar', 'references', 'rewrite', 'discussion'
+  )),
+  credits_consumed NUMERIC(14,4) NOT NULL,
   input_tokens INTEGER,
   output_tokens INTEGER,
   model VARCHAR(100),

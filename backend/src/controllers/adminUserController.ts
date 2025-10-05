@@ -4,12 +4,14 @@ import pool from '../config/database';
 import { execute, query } from '../utils/pgQuery';
 import { AdminRequest } from '../middleware/adminAuth';
 import { logAdminOperation } from './adminAuthController';
+import { formatCredit, roundCredit } from '../utils/creditMath';
 
 interface User {
   id: string;
   email: string;
   phone: string;
   credits: number;
+  credits_expire_at: Date | string | null;
   status: 'active' | 'banned';
   created_at: Date;
   updated_at: Date;
@@ -72,6 +74,11 @@ export const getUserList = async (req: AdminRequest, res: Response) => {
       [...queryParams, limit, offset]
     );
 
+    const normalizedUsers = users.map(user => ({
+      ...user,
+      credits_expire_at: user.credits_expire_at ? new Date(user.credits_expire_at).toISOString() : null,
+    }));
+
     // 查询总数
     const [countResult] = await query<{ total: number }>(
       pool,
@@ -82,7 +89,7 @@ export const getUserList = async (req: AdminRequest, res: Response) => {
     const total = countResult[0]?.total ?? 0;
 
     res.json({
-      users,
+      users: normalizedUsers,
       pagination: {
         page: Number(page),
         pageSize: Number(pageSize),
@@ -113,6 +120,10 @@ export const getUserDetail = async (req: AdminRequest, res: Response) => {
     }
 
     const user = users[0];
+    const normalizedUser = {
+      ...user,
+      credits_expire_at: user.credits_expire_at ? new Date(user.credits_expire_at).toISOString() : null,
+    };
 
     // 查询用户论文数量
     const [paperCount] = await query<{ count: number }>(
@@ -153,7 +164,7 @@ export const getUserDetail = async (req: AdminRequest, res: Response) => {
     );
 
     res.json({
-      user,
+      user: normalizedUser,
       stats: {
         totalPapers: paperCount[0]?.count ?? 0,
         totalConsume: consumeStats[0]?.total_consume || 0,
@@ -238,7 +249,14 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
     }
 
     const user = users[0];
-    const newBalance = user.credits + Number(amount);
+    const amountNumber = Number(amount);
+
+    if (!Number.isFinite(amountNumber)) {
+      return res.status(400).json({ error: '积分数值无效' });
+    }
+
+    const delta = roundCredit(amountNumber);
+    const newBalance = roundCredit(user.credits + delta);
 
     // 开启事务
     const connection = await pool.connect();
@@ -249,7 +267,7 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
       await execute(
         connection,
         'UPDATE users SET credits = ? WHERE id = ?',
-        [newBalance, userId]
+        [formatCredit(newBalance), userId]
       );
 
       // 记录积分流水
@@ -262,8 +280,8 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
           uuidv4(),
           userId,
           'bonus',
-          Number(amount),
-          newBalance,
+          formatCredit(delta),
+          formatCredit(newBalance),
           description || '管理员充值'
         ]
       );
@@ -276,7 +294,12 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
         'recharge_credits',
         'user',
         userId,
-        { amount, description, balanceBefore: user.credits, balanceAfter: newBalance },
+        {
+          amount: delta,
+          description,
+          balanceBefore: roundCredit(user.credits),
+          balanceAfter: newBalance,
+        },
         req.ip
       );
 
@@ -293,6 +316,114 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
   } catch (error) {
     console.error('充值积分失败:', error);
     res.status(500).json({ error: '充值积分失败' });
+  }
+};
+
+// 直接设置用户积分与有效期
+export const updateUserCredits = async (req: AdminRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { credits, expires_at, reason } = req.body as {
+      credits: number;
+      expires_at?: string | null;
+      reason?: string;
+    };
+    const adminId = req.adminId!;
+
+    const creditsNumber = Number(credits);
+    if (!Number.isFinite(creditsNumber) || creditsNumber < 0) {
+      return res.status(400).json({ error: '积分必须是大于等于0的数字' });
+    }
+    const normalizedCredits = roundCredit(creditsNumber);
+
+    let expireDate: Date | null = null;
+    if (expires_at) {
+      const parsed = new Date(expires_at);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: '有效期格式不正确' });
+      }
+      expireDate = parsed;
+    }
+
+    const [users] = await query<User>(
+      pool,
+      'SELECT id, credits, credits_expire_at FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    const user = users[0];
+    const currentCredits = roundCredit(user.credits);
+    const delta = roundCredit(normalizedCredits - currentCredits);
+
+    const connection = await pool.connect();
+
+    try {
+      await connection.query('BEGIN');
+
+      await execute(
+        connection,
+        'UPDATE users SET credits = ?, credits_expire_at = ?, updated_at = ? WHERE id = ?',
+        [formatCredit(normalizedCredits), expireDate, new Date(), userId]
+      );
+
+      if (delta !== 0) {
+        await execute(
+          connection,
+          `INSERT INTO credit_transactions
+           (id, user_id, type, amount, balance_after, description, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)` ,
+          [
+            uuidv4(),
+            userId,
+            'adjustment',
+            formatCredit(delta),
+            formatCredit(normalizedCredits),
+            reason || '管理员手动调整',
+            new Date(),
+          ]
+        );
+      }
+
+      await connection.query('COMMIT');
+    } catch (error) {
+      await connection.query('ROLLBACK');
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    const expiresBefore = user.credits_expire_at
+      ? new Date(user.credits_expire_at).toISOString()
+      : null;
+
+    await logAdminOperation(
+      adminId,
+      'update_user_credits',
+      'user',
+      userId,
+      {
+        reason,
+        creditsBefore: currentCredits,
+        creditsAfter: normalizedCredits,
+        delta,
+        expiresBefore,
+        expiresAfter: expireDate ? expireDate.toISOString() : null,
+      },
+      req.ip
+    );
+
+    res.json({
+      message: '用户积分已更新',
+      credits: normalizedCredits,
+      credits_expire_at: expireDate ? expireDate.toISOString() : null,
+    });
+  } catch (error) {
+    console.error('更新用户积分失败:', error);
+    res.status(500).json({ error: '更新用户积分失败' });
   }
 };
 

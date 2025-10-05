@@ -2,6 +2,26 @@ import { useEffect, useState } from 'react';
 import { userService } from '../services/userService';
 import type { User, UserListParams } from '../services/userService';
 
+const toDateTimeLocalValue = (iso?: string | null) => {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 16);
+};
+
+const toISOStringFromLocal = (value: string) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+};
+
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -21,6 +41,11 @@ export default function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [rechargeAmount, setRechargeAmount] = useState('');
   const [rechargeDescription, setRechargeDescription] = useState('');
+  const [recharging, setRecharging] = useState(false);
+  const [adjustCredits, setAdjustCredits] = useState('');
+  const [adjustExpireAt, setAdjustExpireAt] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
+  const [updatingCredits, setUpdatingCredits] = useState(false);
 
   useEffect(() => {
     loadUsers();
@@ -57,6 +82,11 @@ export default function UsersPage() {
     setSelectedUser(user);
     setRechargeAmount('');
     setRechargeDescription('');
+    setRecharging(false);
+    setAdjustCredits(String(user.credits));
+    setAdjustExpireAt(toDateTimeLocalValue(user.credits_expire_at));
+    setAdjustReason('');
+    setUpdatingCredits(false);
     setShowRechargeModal(true);
   };
 
@@ -66,6 +96,7 @@ export default function UsersPage() {
     }
 
     try {
+      setRecharging(true);
       await userService.rechargeCredits(
         selectedUser.id,
         Number(rechargeAmount),
@@ -76,6 +107,38 @@ export default function UsersPage() {
       alert('充值成功');
     } catch (error) {
       alert('充值失败');
+    } finally {
+      setRecharging(false);
+    }
+  };
+
+  const handleUpdateCredits = async () => {
+    if (!selectedUser) {
+      return;
+    }
+
+    const targetCredits = Number(adjustCredits);
+    if (!Number.isFinite(targetCredits) || targetCredits < 0) {
+      alert('积分必须是大于等于0的数字');
+      return;
+    }
+
+    const expiresAtIso = toISOStringFromLocal(adjustExpireAt || '');
+
+    try {
+      setUpdatingCredits(true);
+      await userService.updateUserCredits(selectedUser.id, {
+        credits: targetCredits,
+        expires_at: expiresAtIso,
+        reason: adjustReason || undefined,
+      });
+      setShowRechargeModal(false);
+      loadUsers();
+      alert('积分信息已更新');
+    } catch (error) {
+      alert('更新失败');
+    } finally {
+      setUpdatingCredits(false);
     }
   };
 
@@ -125,6 +188,7 @@ export default function UsersPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">邮箱</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">手机</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">积分</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">有效期</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">论文数</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">注册时间</th>
@@ -142,6 +206,11 @@ export default function UsersPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {user.credits}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {user.credits_expire_at
+                        ? new Date(user.credits_expire_at).toLocaleString()
+                        : '未设置'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {user.total_papers || 0}
@@ -213,48 +282,114 @@ export default function UsersPage() {
       {showRechargeModal && selectedUser && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-96">
-            <h3 className="text-lg font-semibold mb-4">为用户充值积分</h3>
-            <div className="space-y-4">
+            <h3 className="text-lg font-semibold mb-2">积分管理</h3>
+            <div className="text-sm text-gray-600 mb-4 space-y-1">
+              <div>用户：{selectedUser.email}</div>
+              <div>当前积分：{selectedUser.credits}</div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">用户</label>
-                <div className="text-gray-900">{selectedUser.email}</div>
-                <div className="text-sm text-gray-500">当前积分：{selectedUser.credits}</div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">充值数量</label>
-                <input
-                  type="number"
-                  value={rechargeAmount}
-                  onChange={(e) => setRechargeAmount(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  placeholder="请输入充值积分数量"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
-                <input
-                  type="text"
-                  value={rechargeDescription}
-                  onChange={(e) => setRechargeDescription(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  placeholder="选填"
-                />
+                当前有效期：
+                {selectedUser.credits_expire_at
+                  ? new Date(selectedUser.credits_expire_at).toLocaleString()
+                  : '未设置'}
               </div>
             </div>
-            <div className="flex gap-2 mt-6">
-              <button
-                onClick={handleRecharge}
-                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700"
-              >
-                确认充值
-              </button>
-              <button
-                onClick={() => setShowRechargeModal(false)}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300"
-              >
-                取消
-              </button>
+
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-gray-700">充值积分</h4>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">充值数量</label>
+                  <input
+                    type="number"
+                    value={rechargeAmount}
+                    onChange={(e) => setRechargeAmount(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="请输入充值积分数量"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                  <input
+                    type="text"
+                    value={rechargeDescription}
+                    onChange={(e) => setRechargeDescription(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="选填"
+                  />
+                </div>
+                <button
+                  onClick={handleRecharge}
+                  disabled={recharging || !rechargeAmount}
+                  className={`w-full py-2 rounded-lg text-white ${
+                    recharging || !rechargeAmount
+                      ? 'bg-blue-300 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  {recharging ? '处理中…' : '确认充值'}
+                </button>
+              </div>
+
+              <div className="border-t border-gray-200 pt-4 space-y-3">
+                <h4 className="text-sm font-semibold text-gray-700">直接设置积分与有效期</h4>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">目标积分</label>
+                  <input
+                    type="number"
+                    value={adjustCredits}
+                    onChange={(e) => setAdjustCredits(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="输入调整后的积分余额"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">积分有效期</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="datetime-local"
+                      value={adjustExpireAt}
+                      onChange={(e) => setAdjustExpireAt(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAdjustExpireAt('')}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
+                    >
+                      清除
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                  <input
+                    type="text"
+                    value={adjustReason}
+                    onChange={(e) => setAdjustReason(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="记录调整原因（选填）"
+                  />
+                </div>
+                <button
+                  onClick={handleUpdateCredits}
+                  disabled={updatingCredits}
+                  className={`w-full py-2 rounded-lg text-white ${
+                    updatingCredits
+                      ? 'bg-green-300 cursor-not-allowed'
+                      : 'bg-green-600 hover:bg-green-700'
+                  }`}
+                >
+                  {updatingCredits ? '保存中…' : '保存设置'}
+                </button>
+              </div>
             </div>
+
+            <button
+              onClick={() => setShowRechargeModal(false)}
+              className="mt-6 w-full bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300"
+            >
+              关闭
+            </button>
           </div>
         </div>
       )}

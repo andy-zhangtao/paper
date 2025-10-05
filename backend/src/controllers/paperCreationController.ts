@@ -8,6 +8,11 @@ import {
 import { AuthRequest } from '../middleware/auth'
 import * as aiService from '../services/aiService'
 import { query } from '../utils/pgQuery'
+import {
+  deductCreditsByTokens,
+  getUserCreditStatus,
+  TokenDeductionResult,
+} from './creditsController'
 
 interface PromptTemplateRow {
   id: string
@@ -38,6 +43,76 @@ class HttpError extends Error {
     super(typeof body === 'object' ? body?.error?.message ?? '请求错误' : String(body))
     this.status = status
     this.body = body
+  }
+}
+
+function handleDeductionFailure(res: Response, deduction: TokenDeductionResult) {
+  if (deduction.ok) {
+    return
+  }
+
+  if (deduction.reason === 'NOT_FOUND') {
+    throw new HttpError(404, {
+      success: false,
+      error: {
+        code: 'USER_NOT_FOUND',
+        message: '用户不存在',
+      },
+    })
+  }
+
+  const isExpired = deduction.reason === 'EXPIRED'
+
+  throw new HttpError(402, {
+    success: false,
+    error: {
+      code: isExpired ? 'CREDITS_EXPIRED' : 'INSUFFICIENT_CREDITS',
+      message: isExpired ? '积分已过期，请联系管理员续期' : '积分不足，请充值',
+      details: {
+        required: deduction.cost,
+        ratio: deduction.ratio,
+      },
+    },
+  })
+}
+
+async function ensureCreditsActive(userId: string): Promise<void> {
+  const status = await getUserCreditStatus(userId)
+
+  if (!status) {
+    throw new HttpError(404, {
+      success: false,
+      error: {
+        code: 'USER_NOT_FOUND',
+        message: '用户不存在',
+      },
+    })
+  }
+
+  if (status.isExpired) {
+    throw new HttpError(402, {
+      success: false,
+      error: {
+        code: 'CREDITS_EXPIRED',
+        message: '积分已过期，请联系管理员续期',
+        details: {
+          balance: status.credits,
+        },
+      },
+    })
+  }
+
+  if (status.credits <= 0) {
+    throw new HttpError(402, {
+      success: false,
+      error: {
+        code: 'INSUFFICIENT_CREDITS',
+        message: '积分不足，请充值',
+        details: {
+          balance: status.credits,
+        },
+      },
+    })
   }
 }
 
@@ -269,14 +344,42 @@ export const listStagePrompts = async (req: AuthRequest, res: Response) => {
 
 export const chatWithPrompt = async (req: AuthRequest, res: Response) => {
   try {
+    const userId = req.userId!
     const context = await prepareChatContext(req)
+    
+    // 检查积分状态
+    await ensureCreditsActive(userId)
+    
+    // 调用 AI 服务
     const aiResponse = await aiService.chatCompletion(context.messages, undefined, context.stateSnapshot)
+    
+    // 扣除积分
+    const deduction = await deductCreditsByTokens(
+      userId,
+      {
+        totalTokens: aiResponse.usage.totalTokens,
+        promptTokens: aiResponse.usage.promptTokens,
+        completionTokens: aiResponse.usage.completionTokens,
+        serviceType: 'paper_creation',
+        model: aiResponse.model,
+      },
+      '论文创建对话'
+    )
+    
+    if (!deduction.ok) {
+      handleDeductionFailure(res, deduction)
+      return
+    }
 
     return res.json({
       success: true,
       data: {
         reply: aiResponse.reply,
         state: aiResponse.state,
+        credits_cost: deduction.cost,
+        credits_remaining: deduction.remaining,
+        token_usage: aiResponse.usage,
+        token_to_credit_ratio: deduction.ratio,
       },
     })
   } catch (error) {
@@ -296,7 +399,11 @@ export const chatWithPrompt = async (req: AuthRequest, res: Response) => {
 
 export const chatWithPromptStream = async (req: AuthRequest, res: Response) => {
   try {
+    const userId = req.userId!
     const context = await prepareChatContext(req)
+    
+    // 检查积分状态
+    await ensureCreditsActive(userId)
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
     res.setHeader('Cache-Control', 'no-cache, no-transform')
@@ -320,9 +427,10 @@ export const chatWithPromptStream = async (req: AuthRequest, res: Response) => {
     })
 
     let endSent = false
+    let aiResult: aiService.PaperCreationChatResult | null = null
 
     try {
-      await aiService.chatCompletionStream(
+      aiResult = await aiService.chatCompletionStream(
         context.messages,
         undefined,
         context.stateSnapshot,
@@ -339,6 +447,35 @@ export const chatWithPromptStream = async (req: AuthRequest, res: Response) => {
         abortSignal,
         false,
       )
+      
+      // 扣除积分
+      const deduction = await deductCreditsByTokens(
+        userId,
+        {
+          totalTokens: aiResult.usage.totalTokens,
+          promptTokens: aiResult.usage.promptTokens,
+          completionTokens: aiResult.usage.completionTokens,
+          serviceType: 'paper_creation',
+          model: aiResult.model,
+        },
+        '论文创建对话（流式）'
+      )
+      
+      if (!deduction.ok) {
+        sendEvent('error', {
+          code: deduction.reason === 'EXPIRED' ? 'CREDITS_EXPIRED' : 'INSUFFICIENT_CREDITS',
+          message: deduction.reason === 'EXPIRED' ? '积分已过期' : '积分不足',
+          required: deduction.cost,
+        })
+      } else {
+        sendEvent('credits', {
+          cost: deduction.cost,
+          remaining: deduction.remaining,
+          ratio: deduction.ratio,
+          usage: aiResult.usage,
+        })
+      }
+      
       sendEvent('end', {})
       endSent = true
     } catch (error: any) {

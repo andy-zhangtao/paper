@@ -1,12 +1,15 @@
-import { Coins } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Coins } from 'lucide-react'
 
 interface CreditBalanceProps {
   balance: number
   onRecharge: () => void
 }
 
-export const CreditBalance = ({ balance, onRecharge }: CreditBalanceProps) => {
+export const CreditBalance = ({ balance = 0, onRecharge }: CreditBalanceProps) => {
+  // 确保 balance 是有效数字
+  const displayBalance = typeof balance === 'number' && !isNaN(balance) ? balance : 0
+  
   return (
     <div className="flex items-center gap-3">
       {/* 积分显示 */}
@@ -14,7 +17,7 @@ export const CreditBalance = ({ balance, onRecharge }: CreditBalanceProps) => {
         <Coins className="w-4 h-4" />
         <div className="flex items-baseline gap-1">
           <span className="text-xs opacity-80">积分</span>
-          <span className="text-sm font-bold">{balance.toLocaleString()}</span>
+          <span className="text-sm font-bold">{displayBalance.toLocaleString()}</span>
         </div>
       </div>
 

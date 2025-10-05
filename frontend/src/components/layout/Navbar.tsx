@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { Menu, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useCredit } from '@/contexts/CreditContext'
 import { CreditBalance } from '@/features/credits/CreditBalance'
 import { RechargeDialog } from '@/features/credits/RechargeDialog'
+import { Menu, User } from 'lucide-react'
+import { useState } from 'react'
 
 interface NavbarProps {
   onMenuClick?: () => void
@@ -10,8 +11,12 @@ interface NavbarProps {
 
 export const Navbar = ({ onMenuClick }: NavbarProps) => {
   const [rechargeOpen, setRechargeOpen] = useState(false)
-  // TODO: 从状态管理中获取真实积分
-  const balance = 1000
+  const { balance, refreshBalance } = useCredit()
+
+  // 充值成功后刷新积分
+  const handleRechargeSuccess = () => {
+    refreshBalance()
+  }
 
   return (
     <>
@@ -55,6 +60,7 @@ export const Navbar = ({ onMenuClick }: NavbarProps) => {
       <RechargeDialog
         open={rechargeOpen}
         onOpenChange={setRechargeOpen}
+        onSuccess={handleRechargeSuccess}
       />
     </>
   )

@@ -411,6 +411,8 @@ export interface PaperCreationState {
 export interface PaperCreationChatResult {
   reply: string
   state?: PaperCreationState
+  usage: TokenUsage
+  model: string
 }
 
 export interface PaperCreationStreamCallbacks {
@@ -430,10 +432,9 @@ export async function chatCompletionStream(
     throw new Error('messages不能为空');
   }
 
-  const enhancedMessages = messages
-  if (useEnhancedFormat) {
-    const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
-  }
+  const enhancedMessages = useEnhancedFormat 
+    ? buildPaperCreationMessages(messages, stateSnapshot)
+    : messages
   
   console.log("enhancedMessages:", enhancedMessages)
   console.log("model:", model)
@@ -456,6 +457,7 @@ export async function chatCompletionStream(
   let buffer = ''
   let fullText = ''
   let emittedLength = 0
+  let streamUsage: TokenUsage | null = null
 
   const emitLatestVisibleText = () => {
     const stateIndex = fullText.indexOf('<STATE>')
@@ -496,6 +498,18 @@ export async function chatCompletionStream(
       if (content) {
         fullText += content.replace(/\r/g, '')
         emitLatestVisibleText()
+      }
+      // 捕获 usage 信息
+      if (parsed.usage) {
+        const usage = parsed.usage
+        const promptTokens = Number(usage.prompt_tokens) || 0
+        const completionTokens = Number(usage.completion_tokens) || 0
+        const totalTokens = Number(usage.total_tokens) || promptTokens + completionTokens
+        streamUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+        }
       }
     } catch (error) {
       console.warn('解析OpenRouter流数据失败:', error)
@@ -551,9 +565,19 @@ export async function chatCompletionStream(
       }
 
       const cleanReply = fullText.replace(/<STATE>[\s\S]*?<\/STATE>/, '').trim()
+      
+      // 如果流式响应没有提供 usage，则估算 token 数量
+      const finalUsage = streamUsage || {
+        promptTokens: Math.ceil(JSON.stringify(enhancedMessages).length / 4),
+        completionTokens: Math.ceil(fullText.length / 4),
+        totalTokens: Math.ceil((JSON.stringify(enhancedMessages).length + fullText.length) / 4),
+      }
+      
       const result: PaperCreationChatResult = {
         reply: cleanReply,
         state: parsedState,
+        usage: finalUsage,
+        model,
       }
 
       emittedLength = cleanReply.length
@@ -601,5 +625,7 @@ export async function chatCompletion(
   return {
     reply: cleanReply,
     state: parsedState,
+    usage: completion.usage,
+    model: completion.model,
   }
 }

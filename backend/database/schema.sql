@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
   phone VARCHAR(20),
   credits NUMERIC(14,4) NOT NULL DEFAULT 0,
   credits_expire_at TIMESTAMP,
+  is_vip BOOLEAN NOT NULL DEFAULT FALSE,
   status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'banned')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -26,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_status ON users(status);
+CREATE INDEX idx_users_is_vip ON users(is_vip);
 
 CREATE TRIGGER update_users_updated_at
   BEFORE UPDATE ON users

@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { Readable } from 'stream';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { Readable } from 'stream';
 import { AI_MODELS, AI_PARAMS, OPENROUTER_CONFIG } from '../config/constants';
 
 // 创建axios实例，配置代理
@@ -363,12 +363,19 @@ export async function chatCompletionStream(
   stateSnapshot: PaperCreationState | undefined,
   callbacks: PaperCreationStreamCallbacks,
   signal?: AbortSignal,
+  useEnhancedFormat: boolean = true,
 ): Promise<PaperCreationChatResult> {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('messages不能为空');
   }
 
-  const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
+  const enhancedMessages = messages
+  if (useEnhancedFormat) {
+    const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
+  }
+  
+  console.log("enhancedMessages:", enhancedMessages)
+  console.log("model:", model)
 
   const requestBody = {
     model,

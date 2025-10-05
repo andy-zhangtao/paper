@@ -1,13 +1,13 @@
 import { Response } from 'express'
 import pool from '../config/database'
-import { query } from '../utils/pgQuery'
-import { AuthRequest } from '../middleware/auth'
 import {
-  PAPER_CREATION_STAGES,
   isValidPaperCreationStage,
+  PAPER_CREATION_STAGES,
   PaperCreationStageCode,
 } from '../config/paperCreation'
+import { AuthRequest } from '../middleware/auth'
 import * as aiService from '../services/aiService'
+import { query } from '../utils/pgQuery'
 
 interface PromptTemplateRow {
   id: string
@@ -337,6 +337,7 @@ export const chatWithPromptStream = async (req: AuthRequest, res: Response) => {
           },
         },
         abortSignal,
+        false,
       )
       sendEvent('end', {})
       endSent = true

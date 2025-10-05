@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) NOT NULL UNIQUE,
   password VARCHAR(255) NOT NULL,
   phone VARCHAR(20),
-  credits INTEGER NOT NULL DEFAULT 0,
+  credits NUMERIC(14,4) NOT NULL DEFAULT 0,
   credits_expire_at TIMESTAMP,
   status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'banned')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -57,8 +57,8 @@ CREATE TABLE IF NOT EXISTS credit_transactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type VARCHAR(20) NOT NULL CHECK (type IN ('recharge', 'consume', 'refund', 'bonus', 'adjustment')),
-  amount INTEGER NOT NULL,
-  balance_after INTEGER NOT NULL,
+  amount NUMERIC(14,4) NOT NULL,
+  balance_after NUMERIC(14,4) NOT NULL,
   description VARCHAR(500),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS recharge_orders (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   package_id UUID NOT NULL REFERENCES recharge_packages(id),
   amount DECIMAL(10,2) NOT NULL,
-  credits INTEGER NOT NULL,
+  credits NUMERIC(14,4) NOT NULL,
   status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'success', 'failed', 'refunded')),
   payment_method VARCHAR(50),
   payment_id VARCHAR(255),
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS ai_usage_logs (
   service_type VARCHAR(20) NOT NULL CHECK (service_type IN (
     'polish', 'translate', 'expand', 'summarize', 'chat', 'outline', 'grammar', 'references', 'rewrite', 'discussion'
   )),
-  credits_consumed INTEGER NOT NULL,
+  credits_consumed NUMERIC(14,4) NOT NULL,
   input_tokens INTEGER,
   output_tokens INTEGER,
   model VARCHAR(100),

@@ -1,7 +1,10 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// 将NUMERIC类型解析为JavaScript中的number
+types.setTypeParser(1700, (value) => (value === null ? null : parseFloat(value)));
 
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',

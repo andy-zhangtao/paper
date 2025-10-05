@@ -4,6 +4,7 @@ import pool from '../config/database';
 import { execute, query } from '../utils/pgQuery';
 import { AdminRequest } from '../middleware/adminAuth';
 import { logAdminOperation } from './adminAuthController';
+import { formatCredit, roundCredit } from '../utils/creditMath';
 
 interface User {
   id: string;
@@ -248,7 +249,14 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
     }
 
     const user = users[0];
-    const newBalance = user.credits + Number(amount);
+    const amountNumber = Number(amount);
+
+    if (!Number.isFinite(amountNumber)) {
+      return res.status(400).json({ error: '积分数值无效' });
+    }
+
+    const delta = roundCredit(amountNumber);
+    const newBalance = roundCredit(user.credits + delta);
 
     // 开启事务
     const connection = await pool.connect();
@@ -259,7 +267,7 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
       await execute(
         connection,
         'UPDATE users SET credits = ? WHERE id = ?',
-        [newBalance, userId]
+        [formatCredit(newBalance), userId]
       );
 
       // 记录积分流水
@@ -272,8 +280,8 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
           uuidv4(),
           userId,
           'bonus',
-          Number(amount),
-          newBalance,
+          formatCredit(delta),
+          formatCredit(newBalance),
           description || '管理员充值'
         ]
       );
@@ -286,7 +294,12 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
         'recharge_credits',
         'user',
         userId,
-        { amount, description, balanceBefore: user.credits, balanceAfter: newBalance },
+        {
+          amount: delta,
+          description,
+          balanceBefore: roundCredit(user.credits),
+          balanceAfter: newBalance,
+        },
         req.ip
       );
 
@@ -317,10 +330,11 @@ export const updateUserCredits = async (req: AdminRequest, res: Response) => {
     };
     const adminId = req.adminId!;
 
-    const normalizedCredits = Number(credits);
-    if (!Number.isFinite(normalizedCredits) || normalizedCredits < 0) {
+    const creditsNumber = Number(credits);
+    if (!Number.isFinite(creditsNumber) || creditsNumber < 0) {
       return res.status(400).json({ error: '积分必须是大于等于0的数字' });
     }
+    const normalizedCredits = roundCredit(creditsNumber);
 
     let expireDate: Date | null = null;
     if (expires_at) {
@@ -342,7 +356,8 @@ export const updateUserCredits = async (req: AdminRequest, res: Response) => {
     }
 
     const user = users[0];
-    const delta = normalizedCredits - user.credits;
+    const currentCredits = roundCredit(user.credits);
+    const delta = roundCredit(normalizedCredits - currentCredits);
 
     const connection = await pool.connect();
 
@@ -352,7 +367,7 @@ export const updateUserCredits = async (req: AdminRequest, res: Response) => {
       await execute(
         connection,
         'UPDATE users SET credits = ?, credits_expire_at = ?, updated_at = ? WHERE id = ?',
-        [normalizedCredits, expireDate, new Date(), userId]
+        [formatCredit(normalizedCredits), expireDate, new Date(), userId]
       );
 
       if (delta !== 0) {
@@ -365,8 +380,8 @@ export const updateUserCredits = async (req: AdminRequest, res: Response) => {
             uuidv4(),
             userId,
             'adjustment',
-            delta,
-            normalizedCredits,
+            formatCredit(delta),
+            formatCredit(normalizedCredits),
             reason || '管理员手动调整',
             new Date(),
           ]
@@ -392,7 +407,7 @@ export const updateUserCredits = async (req: AdminRequest, res: Response) => {
       userId,
       {
         reason,
-        creditsBefore: user.credits,
+        creditsBefore: currentCredits,
         creditsAfter: normalizedCredits,
         delta,
         expiresBefore,

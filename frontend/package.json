@@ -14,6 +14,7 @@
     "axios": "^1.12.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "docx": "^9.5.1",
     "framer-motion": "^12.23.22",
     "katex": "^0.16.23",
     "lucide-react": "^0.544.0",

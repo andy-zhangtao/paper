@@ -5,9 +5,10 @@ import { PaperList } from '@/features/papers/PaperList'
 import { mockPapers } from '@/lib/mock'
 import { LoginPage } from '@/pages/LoginPage'
 import { NewPaperPage } from '@/pages/NewPaper'
+import { TutorialPage } from '@/pages/TutorialPage'
 import { useEffect, useState } from 'react'
 
-type View = 'list' | 'new-paper'
+type View = 'list' | 'new-paper' | 'tutorial'
 
 function AppContent() {
   const [currentView, setCurrentView] = useState<View>('list')
@@ -56,13 +57,20 @@ function AppContent() {
     setCurrentView('list')
   }
 
+  if (currentView === 'tutorial') {
+    return <TutorialPage onBack={handleBackToHome} />
+  }
+
   if (currentView === 'new-paper') {
     return <NewPaperPage onBack={handleBackToHome} />
   }
 
   return (
     <>
-      <AppLayout onLoginClick={() => setShowLogin(true)}>
+      <AppLayout 
+        onLoginClick={() => setShowLogin(true)}
+        onNavigate={setCurrentView}
+      >
         <PaperList
           papers={papers}
           onCreatePaper={handleCreatePaper}

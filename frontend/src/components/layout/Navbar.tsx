@@ -1,22 +1,13 @@
 import { Button } from '@/components/ui/button'
 import { useCredit } from '@/contexts/CreditContext'
-import { CreditBalance } from '@/features/credits/CreditBalance'
-import { RechargeDialog } from '@/features/credits/RechargeDialog'
-import { Menu, User } from 'lucide-react'
-import { useState } from 'react'
+import { Coins, Menu, User } from 'lucide-react'
 
 interface NavbarProps {
   onMenuClick?: () => void
 }
 
 export const Navbar = ({ onMenuClick }: NavbarProps) => {
-  const [rechargeOpen, setRechargeOpen] = useState(false)
-  const { balance, refreshBalance } = useCredit()
-
-  // 充值成功后刷新积分
-  const handleRechargeSuccess = () => {
-    refreshBalance()
-  }
+  const { balance } = useCredit()
 
   return (
     <>
@@ -28,7 +19,6 @@ export const Navbar = ({ onMenuClick }: NavbarProps) => {
               variant="ghost"
               size="sm"
               onClick={onMenuClick}
-              className="lg:hidden"
             >
               <Menu className="w-5 h-5" />
             </Button>
@@ -43,10 +33,14 @@ export const Navbar = ({ onMenuClick }: NavbarProps) => {
 
           {/* 右侧：积分余额 + 用户菜单 */}
           <div className="flex items-center gap-4">
-            <CreditBalance
-              balance={balance}
-              onRecharge={() => setRechargeOpen(true)}
-            />
+            {/* 积分显示（隐藏充值按钮） */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-br from-purple-500 to-blue-600 text-white rounded-lg">
+              <Coins className="w-4 h-4" />
+              <div className="flex items-baseline gap-1">
+                <span className="text-xs opacity-80">积分</span>
+                <span className="text-sm font-bold">{balance.toLocaleString()}</span>
+              </div>
+            </div>
 
             {/* 用户菜单 */}
             <Button variant="ghost" size="sm" className="rounded-full">
@@ -55,13 +49,6 @@ export const Navbar = ({ onMenuClick }: NavbarProps) => {
           </div>
         </div>
       </nav>
-
-      {/* 充值弹窗 */}
-      <RechargeDialog
-        open={rechargeOpen}
-        onOpenChange={setRechargeOpen}
-        onSuccess={handleRechargeSuccess}
-      />
     </>
   )
 }

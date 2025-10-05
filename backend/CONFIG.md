@@ -11,23 +11,18 @@
 
 ## 🎯 核心配置项
 
-### 1. AI积分消耗 (AI_CREDITS_COST)
+### 1. 积分扣费比例 (TOKEN_TO_CREDIT_RATIO)
 
-控制各项AI功能的积分消耗:
+系统按「Token × 比例」扣除积分，管理员可在后台随时调整。
 
-| 功能 | 环境变量 | 默认值 | 说明 |
-|------|----------|--------|------|
-| 段落润色 | `CREDITS_COST_POLISH` | 15 | 每次润色消耗 |
-| 生成大纲 | `CREDITS_COST_OUTLINE` | 10 | 生成论文大纲 |
-| 语法检查 | `CREDITS_COST_GRAMMAR` | 20 | 全文语法检查 |
-| 参考文献 | `CREDITS_COST_REFERENCES` | 10 | 生成参考文献 |
-| 降重改写 | `CREDITS_COST_REWRITE` | 50 | 段落降重(高成本) |
-| AI讨论 | `CREDITS_COST_DISCUSSION` | 20 | 讨论区AI回答 |
+| 配置项 | 环境变量 | 默认值 | 说明 |
+|--------|----------|--------|------|
+| Token积分换算 | `DEFAULT_TOKEN_TO_CREDIT_RATIO` | 1 | 用于初始化 `credit_settings` 表的默认比例 |
 
-**调整建议**:
-- 成本高的功能(降重)可设置更高积分
-- 促销期可临时降低消耗
-- VIP用户可通过代码单独设置折扣
+**说明**:
+- 管理后台 → 积分设置 支持图形界面调整，保存后立即生效。
+- 接口会返回 `token_usage` 和 `token_to_credit_ratio`，便于前端明细展示。
+- 若需要按功能区分倍率，可在业务层基于 Token 使用量再附加系数。
 
 ---
 
@@ -187,10 +182,11 @@ PACKAGE_PREMIUM_PRICE=99.9
 ### 在代码中引用
 
 ```typescript
-import { AI_CREDITS_COST, REWARDS, AI_MODELS } from '../config/constants';
+import { REWARDS, AI_MODELS } from '../config/constants';
+import { getCreditSettings } from '../services/creditSettingsService';
 
-// 使用积分配置
-const cost = AI_CREDITS_COST.polish;
+// 查询当前 Token 积分比例
+const { token_to_credit_ratio } = await getCreditSettings();
 
 // 使用奖励配置
 const registrationReward = REWARDS.registration;

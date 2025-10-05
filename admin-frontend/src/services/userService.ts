@@ -5,6 +5,7 @@ export interface User {
   email: string;
   phone: string;
   credits: number;
+  credits_expire_at?: string | null;
   status: 'active' | 'banned';
   created_at: string;
   updated_at: string;
@@ -53,6 +54,14 @@ export const userService = {
   // 为用户充值积分
   rechargeCredits: async (userId: string, amount: number, description?: string): Promise<void> => {
     await api.post(`/admin/users/${userId}/recharge`, { amount, description });
+  },
+
+  // 直接设置用户积分与有效期
+  updateUserCredits: async (
+    userId: string,
+    payload: { credits: number; expires_at?: string | null; reason?: string }
+  ): Promise<void> => {
+    await api.put(`/admin/users/${userId}/credits`, payload);
   },
 
   // 获取用户积分流水

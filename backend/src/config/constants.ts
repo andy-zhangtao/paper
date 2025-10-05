@@ -4,18 +4,6 @@
  */
 
 /**
- * AI积分消耗配置
- */
-export const AI_CREDITS_COST = {
-  polish: parseInt(process.env.CREDITS_COST_POLISH || '15'),        // 段落润色
-  outline: parseInt(process.env.CREDITS_COST_OUTLINE || '10'),      // 生成大纲
-  grammar: parseInt(process.env.CREDITS_COST_GRAMMAR || '20'),      // 语法检查
-  references: parseInt(process.env.CREDITS_COST_REFERENCES || '10'), // 参考文献
-  rewrite: parseInt(process.env.CREDITS_COST_REWRITE || '50'),      // 降重改写
-  discussion: parseInt(process.env.CREDITS_COST_DISCUSSION || '20'), // AI讨论
-};
-
-/**
  * 运营奖励配置
  */
 export const REWARDS = {
@@ -285,7 +273,6 @@ export const CACHE_CONFIG = {
  * 导出所有配置的类型定义(供TypeScript使用)
  */
 export type Config = {
-  AI_CREDITS_COST: typeof AI_CREDITS_COST;
   REWARDS: typeof REWARDS;
   AI_MODELS: typeof AI_MODELS;
   OPENROUTER_CONFIG: typeof OPENROUTER_CONFIG;

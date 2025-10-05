@@ -1,7 +1,87 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import * as aiService from '../services/aiService';
-import { deductCredits } from './creditsController';
+import {
+  TokenDeductionResult,
+  deductCreditsByTokens,
+  getUserCreditStatus,
+} from './creditsController';
+
+function handleDeductionFailure(res: Response, deduction: TokenDeductionResult) {
+  if (deduction.ok) {
+    return;
+  }
+
+  if (deduction.reason === 'NOT_FOUND') {
+    res.status(404).json({
+      success: false,
+      error: {
+        code: 'USER_NOT_FOUND',
+        message: '用户不存在',
+      },
+    });
+    return;
+  }
+
+  const isExpired = deduction.reason === 'EXPIRED';
+
+  res.status(402).json({
+    success: false,
+    error: {
+      code: isExpired ? 'CREDITS_EXPIRED' : 'INSUFFICIENT_CREDITS',
+      message: isExpired ? '积分已过期，请联系管理员续期' : '积分不足，请充值',
+      details: {
+        required: deduction.cost,
+        ratio: deduction.ratio,
+      },
+    },
+  });
+}
+
+async function ensureCreditsActive(userId: string, res: Response) {
+  const status = await getUserCreditStatus(userId);
+
+  if (!status) {
+    res.status(404).json({
+      success: false,
+      error: {
+        code: 'USER_NOT_FOUND',
+        message: '用户不存在',
+      },
+    });
+    return null;
+  }
+
+  if (status.isExpired) {
+    res.status(402).json({
+      success: false,
+      error: {
+        code: 'CREDITS_EXPIRED',
+        message: '积分已过期，请联系管理员续期',
+        details: {
+          balance: status.credits,
+        },
+      },
+    });
+    return null;
+  }
+
+  if (status.credits <= 0) {
+    res.status(402).json({
+      success: false,
+      error: {
+        code: 'INSUFFICIENT_CREDITS',
+        message: '积分不足，请充值',
+        details: {
+          balance: status.credits,
+        },
+      },
+    });
+    return null;
+  }
+
+  return status;
+}
 
 /**
  * 段落润色
@@ -31,32 +111,38 @@ export const polishText = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // 扣除积分
-    const creditsCost = aiService.AI_CREDITS_COST.polish;
-    const newBalance = await deductCredits(userId, creditsCost, '段落润色');
-
-    if (newBalance === null) {
-      return res.status(402).json({
-        success: false,
-        error: {
-          code: 'INSUFFICIENT_CREDITS',
-          message: '积分不足，请充值',
-          details: {
-            required: creditsCost,
-          },
-        },
-      });
+    if (!(await ensureCreditsActive(userId, res))) {
+      return;
     }
 
     // 调用AI服务
     const result = await aiService.polishText(text, type);
 
+    const deduction = await deductCreditsByTokens(
+      userId,
+      {
+        totalTokens: result.usage.totalTokens,
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
+        serviceType: 'polish',
+        model: result.model,
+      },
+      '段落润色'
+    );
+
+    if (!deduction.ok) {
+      handleDeductionFailure(res, deduction);
+      return;
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         ...result,
-        credits_cost: creditsCost,
-        credits_remaining: newBalance,
+        credits_cost: deduction.cost,
+        credits_remaining: deduction.remaining,
+        token_usage: result.usage,
+        token_to_credit_ratio: deduction.ratio,
       },
     });
   } catch (error: any) {
@@ -99,32 +185,39 @@ export const generateOutline = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // 扣除积分
-    const creditsCost = aiService.AI_CREDITS_COST.outline;
-    const newBalance = await deductCredits(userId, creditsCost, '生成大纲');
-
-    if (newBalance === null) {
-      return res.status(402).json({
-        success: false,
-        error: {
-          code: 'INSUFFICIENT_CREDITS',
-          message: '积分不足，请充值',
-          details: {
-            required: creditsCost,
-          },
-        },
-      });
+    if (!(await ensureCreditsActive(userId, res))) {
+      return;
     }
 
     // 调用AI服务
-    const outline = await aiService.generateOutline(topic, paper_type);
+    const outlineResult = await aiService.generateOutline(topic, paper_type);
+
+    const deduction = await deductCreditsByTokens(
+      userId,
+      {
+        totalTokens: outlineResult.usage.totalTokens,
+        promptTokens: outlineResult.usage.promptTokens,
+        completionTokens: outlineResult.usage.completionTokens,
+        serviceType: 'outline',
+        model: outlineResult.model,
+      },
+      '生成大纲'
+    );
+
+    if (!deduction.ok) {
+      handleDeductionFailure(res, deduction);
+      return;
+    }
 
     return res.status(200).json({
       success: true,
       data: {
-        outline,
-        credits_cost: creditsCost,
-        credits_remaining: newBalance,
+        outline: outlineResult.outline,
+        credits_cost: deduction.cost,
+        credits_remaining: deduction.remaining,
+        token_usage: outlineResult.usage,
+        token_to_credit_ratio: deduction.ratio,
+        model: outlineResult.model,
       },
     });
   } catch (error: any) {
@@ -167,32 +260,39 @@ export const checkGrammar = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // 扣除积分
-    const creditsCost = aiService.AI_CREDITS_COST.grammar;
-    const newBalance = await deductCredits(userId, creditsCost, '语法检查');
-
-    if (newBalance === null) {
-      return res.status(402).json({
-        success: false,
-        error: {
-          code: 'INSUFFICIENT_CREDITS',
-          message: '积分不足，请充值',
-          details: {
-            required: creditsCost,
-          },
-        },
-      });
+    if (!(await ensureCreditsActive(userId, res))) {
+      return;
     }
 
     // 调用AI服务
-    const errors = await aiService.checkGrammar(text, level);
+    const grammarResult = await aiService.checkGrammar(text, level);
+
+    const deduction = await deductCreditsByTokens(
+      userId,
+      {
+        totalTokens: grammarResult.usage.totalTokens,
+        promptTokens: grammarResult.usage.promptTokens,
+        completionTokens: grammarResult.usage.completionTokens,
+        serviceType: 'grammar',
+        model: grammarResult.model,
+      },
+      '语法检查'
+    );
+
+    if (!deduction.ok) {
+      handleDeductionFailure(res, deduction);
+      return;
+    }
 
     return res.status(200).json({
       success: true,
       data: {
-        errors,
-        credits_cost: creditsCost,
-        credits_remaining: newBalance,
+        errors: grammarResult.errors,
+        credits_cost: deduction.cost,
+        credits_remaining: deduction.remaining,
+        token_usage: grammarResult.usage,
+        token_to_credit_ratio: deduction.ratio,
+        model: grammarResult.model,
       },
     });
   } catch (error: any) {
@@ -235,32 +335,39 @@ export const generateReferences = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // 扣除积分
-    const creditsCost = aiService.AI_CREDITS_COST.references;
-    const newBalance = await deductCredits(userId, creditsCost, '生成参考文献');
-
-    if (newBalance === null) {
-      return res.status(402).json({
-        success: false,
-        error: {
-          code: 'INSUFFICIENT_CREDITS',
-          message: '积分不足，请充值',
-          details: {
-            required: creditsCost,
-          },
-        },
-      });
+    if (!(await ensureCreditsActive(userId, res))) {
+      return;
     }
 
     // 调用AI服务
-    const references = await aiService.generateReferences(topic, count, format);
+    const referencesResult = await aiService.generateReferences(topic, count, format);
+
+    const deduction = await deductCreditsByTokens(
+      userId,
+      {
+        totalTokens: referencesResult.usage.totalTokens,
+        promptTokens: referencesResult.usage.promptTokens,
+        completionTokens: referencesResult.usage.completionTokens,
+        serviceType: 'references',
+        model: referencesResult.model,
+      },
+      '生成参考文献'
+    );
+
+    if (!deduction.ok) {
+      handleDeductionFailure(res, deduction);
+      return;
+    }
 
     return res.status(200).json({
       success: true,
       data: {
-        references,
-        credits_cost: creditsCost,
-        credits_remaining: newBalance,
+        references: referencesResult.references,
+        credits_cost: deduction.cost,
+        credits_remaining: deduction.remaining,
+        token_usage: referencesResult.usage,
+        token_to_credit_ratio: deduction.ratio,
+        model: referencesResult.model,
       },
     });
   } catch (error: any) {
@@ -293,32 +400,38 @@ export const rewriteText = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // 扣除积分
-    const creditsCost = aiService.AI_CREDITS_COST.rewrite;
-    const newBalance = await deductCredits(userId, creditsCost, '降重改写');
-
-    if (newBalance === null) {
-      return res.status(402).json({
-        success: false,
-        error: {
-          code: 'INSUFFICIENT_CREDITS',
-          message: '积分不足，请充值',
-          details: {
-            required: creditsCost,
-          },
-        },
-      });
+    if (!(await ensureCreditsActive(userId, res))) {
+      return;
     }
 
     // 调用AI服务
     const result = await aiService.rewriteText(text, similarity_threshold);
 
+    const deduction = await deductCreditsByTokens(
+      userId,
+      {
+        totalTokens: result.usage.totalTokens,
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
+        serviceType: 'rewrite',
+        model: result.model,
+      },
+      '降重改写'
+    );
+
+    if (!deduction.ok) {
+      handleDeductionFailure(res, deduction);
+      return;
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         ...result,
-        credits_cost: creditsCost,
-        credits_remaining: newBalance,
+        credits_cost: deduction.cost,
+        credits_remaining: deduction.remaining,
+        token_usage: result.usage,
+        token_to_credit_ratio: deduction.ratio,
       },
     });
   } catch (error: any) {

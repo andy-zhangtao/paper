@@ -32,10 +32,12 @@ import adminAuthRoutes from './routes/adminAuthRoutes';
 import adminUserRoutes from './routes/adminUserRoutes';
 import adminStatsRoutes from './routes/adminStatsRoutes';
 import adminPromptTemplateRoutes from './routes/adminPromptTemplateRoutes';
+import adminCreditSettingsRoutes from './routes/adminCreditSettingsRoutes';
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/stats', adminStatsRoutes);
 app.use('/api/admin/prompts', adminPromptTemplateRoutes);
+app.use('/api/admin/credits', adminCreditSettingsRoutes);
 
 // 健康检查
 app.get('/health', (req: Request, res: Response) => {

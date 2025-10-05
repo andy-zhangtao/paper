@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   password VARCHAR(255) NOT NULL,
   phone VARCHAR(20),
   credits INTEGER NOT NULL DEFAULT 0,
+  credits_expire_at TIMESTAMP,
   status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'banned')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -55,7 +56,7 @@ CREATE TRIGGER update_papers_updated_at
 CREATE TABLE IF NOT EXISTS credit_transactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type VARCHAR(20) NOT NULL CHECK (type IN ('recharge', 'consume', 'refund', 'bonus')),
+  type VARCHAR(20) NOT NULL CHECK (type IN ('recharge', 'consume', 'refund', 'bonus', 'adjustment')),
   amount INTEGER NOT NULL,
   balance_after INTEGER NOT NULL,
   description VARCHAR(500),
@@ -101,12 +102,30 @@ CREATE TRIGGER update_recharge_orders_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
+-- 5.1 积分设置表
+CREATE TABLE IF NOT EXISTS credit_settings (
+  id SMALLINT PRIMARY KEY DEFAULT 1,
+  token_to_credit_ratio NUMERIC(10,4) NOT NULL DEFAULT 1.0,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER update_credit_settings_updated_at
+  BEFORE UPDATE ON credit_settings
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+INSERT INTO credit_settings (id, token_to_credit_ratio)
+VALUES (1, 1.0)
+ON CONFLICT (id) DO NOTHING;
+
 -- 6. AI使用记录表
 CREATE TABLE IF NOT EXISTS ai_usage_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   paper_id UUID REFERENCES papers(id) ON DELETE SET NULL,
-  service_type VARCHAR(20) NOT NULL CHECK (service_type IN ('polish', 'translate', 'expand', 'summarize', 'chat')),
+  service_type VARCHAR(20) NOT NULL CHECK (service_type IN (
+    'polish', 'translate', 'expand', 'summarize', 'chat', 'outline', 'grammar', 'references', 'rewrite', 'discussion'
+  )),
   credits_consumed INTEGER NOT NULL,
   input_tokens INTEGER,
   output_tokens INTEGER,

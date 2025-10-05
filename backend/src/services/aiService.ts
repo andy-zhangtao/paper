@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { AI_MODELS, AI_PARAMS } from '../config/constants';
+import { Readable } from 'stream';
+import { AI_MODELS, AI_PARAMS, OPENROUTER_CONFIG } from '../config/constants';
 
 // 创建axios实例，配置代理
 const aiClient = axios.create({
@@ -14,9 +15,44 @@ const aiClient = axios.create({
   timeout: AI_PARAMS.timeout,
 });
 
+const DEFAULT_MODEL = OPENROUTER_CONFIG.modelName || AI_MODELS.default;
+
+const PAPER_CREATION_ASSISTANT_PROMPT =
+  '你是Paper AI论文写作助手。请在帮助用户的同时，根据对话判断核心信息，并按以下格式回应：\n' +
+  '1. 先输出自然语言回答。\n' +
+  '2. 紧接着输出一个以<STATE>开始、</STATE>结束的JSON。JSON字段要求：\n' +
+  '- topic: string|null，无法确认请为null。\n' +
+  '- outline: 数组(可为空)，元素包含heading与可选summary，用于概述章节结构。\n' +
+  '- confidence: 0-1之间数字，表示你对topic/outline判断的信心。\n' +
+  '- stage: idea|outline|content (可选)，表明你认为用户所处阶段。\n' +
+  '- contentApproved: boolean，当你判断用户对生成的正文内容满意且准备进入预览时为true。\n' +
+  '- contentSections: 当contentApproved为true时必须提供的数组，每个元素包含heading(章节标题)与content(对应的Markdown正文)。\n' +
+  '示例：\n回答内容...\n<STATE>{"topic":"论文主题","outline":[{"heading":"章节"}],"contentApproved":false,"contentSections":[]}</STATE>';
+
+function buildPaperCreationMessages(
+  messages: ChatMessage[],
+  stateSnapshot?: PaperCreationState,
+): ChatMessage[] {
+  const systemMessages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: PAPER_CREATION_ASSISTANT_PROMPT,
+    },
+  ];
+
+  if (stateSnapshot) {
+    systemMessages.push({
+      role: 'system',
+      content: `当前已知的论文状态(JSON)：${JSON.stringify(stateSnapshot)}`,
+    });
+  }
+
+  return [...systemMessages, ...messages];
+}
+
 // 如果配置了代理，使用代理
-if (process.env.HTTPS_PROXY) {
-  const agent = new HttpsProxyAgent(process.env.HTTPS_PROXY);
+if (OPENROUTER_CONFIG.proxyUrl) {
+  const agent = new HttpsProxyAgent(OPENROUTER_CONFIG.proxyUrl);
   aiClient.defaults.httpsAgent = agent;
 }
 
@@ -26,14 +62,18 @@ export { AI_CREDITS_COST } from '../config/constants';
 /**
  * 调用OpenRouter API
  */
-async function callOpenRouter(messages: any[], model: string = AI_MODELS.default) {
+async function callOpenRouter(messages: any[], model: string) {
   try {
-    const response = await aiClient.post('/chat/completions', {
+    const requestBody = {
       model,
       messages,
       temperature: AI_PARAMS.temperature,
       max_tokens: AI_PARAMS.maxTokens,
-    });
+    };
+
+    console.info('OpenRouter request body:', JSON.stringify(requestBody));
+
+    const response = await aiClient.post('/chat/completions', requestBody);
 
     return response.data.choices[0].message.content;
   } catch (error: any) {
@@ -55,7 +95,7 @@ export async function polishText(text: string, type: 'grammar' | 'logic' | 'styl
   const polished = await callOpenRouter([
     { role: 'system', content: '你是一个专业的学术论文润色助手，擅长优化中文学术论文的表达。' },
     { role: 'user', content: prompts[type] },
-  ]);
+  ], DEFAULT_MODEL);
 
   // 简单的变更检测（实际应用中可以用diff算法）
   const changes = [
@@ -100,7 +140,7 @@ export async function generateOutline(topic: string, paperType: 'research' | 're
   const result = await callOpenRouter([
     { role: 'system', content: '你是一个学术论文写作专家，擅长构建论文框架。' },
     { role: 'user', content: prompt },
-  ]);
+  ], DEFAULT_MODEL);
 
   try {
     // 尝试解析JSON
@@ -152,7 +192,7 @@ ${text}`;
   const result = await callOpenRouter([
     { role: 'system', content: '你是一个专业的中文语法检查助手。' },
     { role: 'user', content: prompt },
-  ]);
+  ], DEFAULT_MODEL);
 
   try {
     const jsonMatch = result.match(/\[[\s\S]*\]/);
@@ -259,7 +299,7 @@ export async function generateDiscussionReply(prompt: string) {
       content: '你是一个专业的学术论文写作助手，擅长回答关于论文写作、结构、逻辑等方面的问题。回答要简洁、专业、有针对性。',
     },
     { role: 'user', content: prompt },
-  ]);
+  ], DEFAULT_MODEL);
 
   return reply;
 }
@@ -281,7 +321,223 @@ ${newContent.substring(0, 500)}...
   const summary = await callOpenRouter([
     { role: 'system', content: '你是一个文档版本对比助手。' },
     { role: 'user', content: prompt },
-  ]);
+  ], DEFAULT_MODEL);
 
   return summary.substring(0, 100); // 限制长度
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface PaperCreationState {
+  topic?: string
+  outline?: Array<{
+    heading: string
+    summary?: string
+  }>
+  confidence?: number
+  stage?: 'idea' | 'outline' | 'content'
+  updatedAt?: string
+  contentApproved?: boolean
+  contentSections?: Array<{
+    heading: string
+    content: string
+  }>
+}
+
+export interface PaperCreationChatResult {
+  reply: string
+  state?: PaperCreationState
+}
+
+export interface PaperCreationStreamCallbacks {
+  onChunk?: (chunk: string) => void
+  onComplete?: (result: PaperCreationChatResult) => void
+}
+
+export async function chatCompletionStream(
+  messages: ChatMessage[],
+  model: string = DEFAULT_MODEL,
+  stateSnapshot: PaperCreationState | undefined,
+  callbacks: PaperCreationStreamCallbacks,
+  signal?: AbortSignal,
+  useEnhancedFormat: boolean = true,
+): Promise<PaperCreationChatResult> {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error('messages不能为空');
+  }
+
+  const enhancedMessages = messages
+  if (useEnhancedFormat) {
+    const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
+  }
+  
+  console.log("enhancedMessages:", enhancedMessages)
+  console.log("model:", model)
+
+  const requestBody = {
+    model,
+    messages: enhancedMessages,
+    temperature: AI_PARAMS.temperature,
+    max_tokens: AI_PARAMS.maxTokens,
+    stream: true,
+  }
+
+  const response = await aiClient.post('/chat/completions', requestBody, {
+    responseType: 'stream',
+    signal,
+  })
+
+  const stream: Readable = response.data
+
+  let buffer = ''
+  let fullText = ''
+  let emittedLength = 0
+
+  const emitLatestVisibleText = () => {
+    const stateIndex = fullText.indexOf('<STATE>')
+    const visibleEnd = stateIndex === -1 ? fullText.length : stateIndex
+    if (visibleEnd > emittedLength) {
+      const chunk = fullText.slice(emittedLength, visibleEnd)
+      if (chunk && callbacks.onChunk) {
+        callbacks.onChunk(chunk)
+      }
+      emittedLength = visibleEnd
+    }
+  }
+
+  const processEvent = (rawEvent: string) => {
+    const trimmed = rawEvent.trim()
+    if (!trimmed) return
+
+    const lines = trimmed.split('\n')
+    let dataLine = ''
+    for (const line of lines) {
+      if (line.startsWith('data:')) {
+        dataLine += line.slice(5).trim()
+      }
+    }
+
+    if (!dataLine) {
+      return
+    }
+
+    if (dataLine === '[DONE]') {
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(dataLine)
+      const delta = parsed.choices?.[0]?.delta ?? {}
+      const content: string = delta.content ?? ''
+      if (content) {
+        fullText += content.replace(/\r/g, '')
+        emitLatestVisibleText()
+      }
+    } catch (error) {
+      console.warn('解析OpenRouter流数据失败:', error)
+    }
+  }
+
+  const result = await new Promise<PaperCreationChatResult>((resolve, reject) => {
+    const handleError = (error: Error) => {
+      stream.destroy()
+      reject(error)
+    }
+
+    if (signal) {
+      signal.addEventListener(
+        'abort',
+        () => {
+          handleError(new Error('请求已被取消'))
+        },
+        { once: true },
+      )
+    }
+
+    stream.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf-8')
+
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary !== -1) {
+        const rawEvent = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        processEvent(rawEvent)
+        boundary = buffer.indexOf('\n\n')
+      }
+    })
+
+    stream.on('error', handleError)
+
+    stream.on('end', () => {
+      if (buffer.trim()) {
+        processEvent(buffer)
+      }
+
+      const stateMatch = fullText.match(/<STATE>([\s\S]*?)<\/STATE>/)
+      let parsedState: PaperCreationState | undefined
+      if (stateMatch) {
+        try {
+          parsedState = {
+            ...JSON.parse(stateMatch[1]),
+            updatedAt: new Date().toISOString(),
+          }
+        } catch (error) {
+          console.warn('解析PaperCreation状态失败:', error)
+        }
+      }
+
+      const cleanReply = fullText.replace(/<STATE>[\s\S]*?<\/STATE>/, '').trim()
+      const result: PaperCreationChatResult = {
+        reply: cleanReply,
+        state: parsedState,
+      }
+
+      emittedLength = cleanReply.length
+
+      if (callbacks.onComplete) {
+        callbacks.onComplete(result)
+      }
+
+      resolve(result)
+    })
+  })
+
+  return result
+}
+export async function chatCompletion(
+  messages: ChatMessage[],
+  model: string = DEFAULT_MODEL,
+  stateSnapshot?: PaperCreationState,
+): Promise<PaperCreationChatResult> {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error('messages不能为空');
+  }
+
+  const enhancedMessages = buildPaperCreationMessages(messages, stateSnapshot)
+
+  const rawReply = await callOpenRouter(enhancedMessages, model)
+
+  const stateMatch = rawReply.match(/<STATE>([\s\S]*?)<\/STATE>/)
+  let parsedState: PaperCreationState | undefined
+  if (stateMatch) {
+    const jsonText = stateMatch[1]
+    try {
+      parsedState = {
+        ...JSON.parse(jsonText),
+        updatedAt: new Date().toISOString(),
+      }
+    } catch (err) {
+      console.warn('解析PaperCreation状态失败:', err)
+    }
+  }
+
+  const cleanReply = rawReply.replace(/<STATE>[\s\S]*?<\/STATE>/, '').trim()
+
+  return {
+    reply: cleanReply,
+    state: parsedState,
+  }
 }

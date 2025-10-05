@@ -1,12 +1,11 @@
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
-import { RowDataPacket } from 'mysql2';
+import { execute, query } from '../utils/pgQuery';
 import { AdminRequest } from '../middleware/adminAuth';
 import { logAdminOperation } from './adminAuthController';
 
-interface User extends RowDataPacket {
+interface User {
   id: string;
   email: string;
   phone: string;
@@ -56,7 +55,8 @@ export const getUserList = async (req: AdminRequest, res: Response) => {
       : '';
 
     // 查询用户列表（带统计信息）
-    const [users] = await pool.query<UserWithStats[]>(
+    const [users] = await query<UserWithStats>(
+      pool,
       `SELECT
         u.*,
         COUNT(DISTINCT p.id) as total_papers,
@@ -73,12 +73,13 @@ export const getUserList = async (req: AdminRequest, res: Response) => {
     );
 
     // 查询总数
-    const [countResult] = await pool.query<RowDataPacket[]>(
+    const [countResult] = await query<{ total: number }>(
+      pool,
       `SELECT COUNT(DISTINCT u.id) as total FROM users u ${whereClause}`,
       queryParams
     );
 
-    const total = countResult[0].total;
+    const total = countResult[0]?.total ?? 0;
 
     res.json({
       users,
@@ -101,7 +102,8 @@ export const getUserDetail = async (req: AdminRequest, res: Response) => {
     const { userId } = req.params;
 
     // 查询用户基本信息
-    const [users] = await pool.query<User[]>(
+    const [users] = await query<User>(
+      pool,
       'SELECT * FROM users WHERE id = ?',
       [userId]
     );
@@ -113,13 +115,15 @@ export const getUserDetail = async (req: AdminRequest, res: Response) => {
     const user = users[0];
 
     // 查询用户论文数量
-    const [paperCount] = await pool.query<RowDataPacket[]>(
+    const [paperCount] = await query<{ count: number }>(
+      pool,
       'SELECT COUNT(*) as count FROM papers WHERE user_id = ?',
       [userId]
     );
 
     // 查询用户积分消费统计
-    const [consumeStats] = await pool.query<RowDataPacket[]>(
+    const [consumeStats] = await query<{ total_consume: number | null; total_recharge: number | null }>(
+      pool,
       `SELECT
         SUM(CASE WHEN type = 'consume' THEN amount ELSE 0 END) as total_consume,
         SUM(CASE WHEN type = 'recharge' THEN amount ELSE 0 END) as total_recharge
@@ -128,7 +132,8 @@ export const getUserDetail = async (req: AdminRequest, res: Response) => {
     );
 
     // 查询最近的积分记录
-    const [recentTransactions] = await pool.query<RowDataPacket[]>(
+    const [recentTransactions] = await query(
+      pool,
       `SELECT * FROM credit_transactions
        WHERE user_id = ?
        ORDER BY created_at DESC
@@ -137,7 +142,8 @@ export const getUserDetail = async (req: AdminRequest, res: Response) => {
     );
 
     // 查询最近的论文
-    const [recentPapers] = await pool.query<RowDataPacket[]>(
+    const [recentPapers] = await query(
+      pool,
       `SELECT id, title, word_count, created_at, updated_at
        FROM papers
        WHERE user_id = ?
@@ -149,7 +155,7 @@ export const getUserDetail = async (req: AdminRequest, res: Response) => {
     res.json({
       user,
       stats: {
-        totalPapers: paperCount[0].count,
+        totalPapers: paperCount[0]?.count ?? 0,
         totalConsume: consumeStats[0]?.total_consume || 0,
         totalRecharge: consumeStats[0]?.total_recharge || 0
       },
@@ -170,7 +176,8 @@ export const toggleUserStatus = async (req: AdminRequest, res: Response) => {
     const adminId = req.adminId!;
 
     // 查询用户当前状态
-    const [users] = await pool.query<User[]>(
+    const [users] = await query<User>(
+      pool,
       'SELECT * FROM users WHERE id = ?',
       [userId]
     );
@@ -220,7 +227,8 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
     }
 
     // 查询用户
-    const [users] = await pool.query<User[]>(
+    const [users] = await query<User>(
+      pool,
       'SELECT * FROM users WHERE id = ?',
       [userId]
     );
@@ -238,13 +246,15 @@ export const rechargeCredits = async (req: AdminRequest, res: Response) => {
 
     try {
       // 更新用户积分
-      await connection.query(
+      await execute(
+        connection,
         'UPDATE users SET credits = ? WHERE id = ?',
         [newBalance, userId]
       );
 
       // 记录积分流水
-      await connection.query(
+      await execute(
+        connection,
         `INSERT INTO credit_transactions
          (id, user_id, type, amount, balance_after, description)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -304,7 +314,8 @@ export const getUserTransactions = async (req: AdminRequest, res: Response) => {
     }
 
     // 查询流水记录
-    const [transactions] = await pool.query<RowDataPacket[]>(
+    const [transactions] = await query(
+      pool,
       `SELECT * FROM credit_transactions
        ${whereClause}
        ORDER BY created_at DESC
@@ -313,12 +324,13 @@ export const getUserTransactions = async (req: AdminRequest, res: Response) => {
     );
 
     // 查询总数
-    const [countResult] = await pool.query<RowDataPacket[]>(
+    const [countResult] = await query<{ total: number }>(
+      pool,
       `SELECT COUNT(*) as total FROM credit_transactions ${whereClause}`,
       queryParams
     );
 
-    const total = countResult[0].total;
+    const total = countResult[0]?.total ?? 0;
 
     res.json({
       transactions,

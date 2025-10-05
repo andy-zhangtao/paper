@@ -1,15 +1,14 @@
-import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
-import { RowDataPacket } from 'mysql2';
 import { AdminRequest } from '../middleware/adminAuth';
+import { query } from '../utils/pgQuery';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
-interface Admin extends RowDataPacket {
+interface Admin {
   id: string;
   username: string;
   password: string;
@@ -23,25 +22,29 @@ interface Admin extends RowDataPacket {
 export const adminLogin = async (req: Request, res: Response) => {
   try {
     const { username, password } = req.body;
-
+    
     if (!username || !password) {
       return res.status(400).json({ error: '用户名和密码不能为空' });
     }
 
     // 查询管理员
-    const [admins] = await pool.query<Admin[]>(
-      'SELECT * FROM admins WHERE username = ? AND status = "active"',
-      [username]
+    const [admins] = await query<Admin>(
+      pool,
+      'SELECT * FROM admins WHERE username = ? AND status = ?',
+      [username, 'active']
     );
 
     if (admins.length === 0) {
       return res.status(401).json({ error: '用户名或密码错误' });
-    }
+    } 
 
     const admin = admins[0];
-
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    console.log('Admin login attempt:', { username: admin.username, id: admin.id, password: hashedPassword, adminPassword: admin.password });
     // 验证密码
+    console.log("password:", password)
     const isValidPassword = await bcrypt.compare(password, admin.password);
+    console.log('isValidPassword:', isValidPassword);
     if (!isValidPassword) {
       return res.status(401).json({ error: '用户名或密码错误' });
     }
@@ -79,7 +82,8 @@ export const getAdminProfile = async (req: AdminRequest, res: Response) => {
   try {
     const adminId = req.adminId;
 
-    const [admins] = await pool.query<Admin[]>(
+    const [admins] = await query<Pick<Admin, 'id' | 'username' | 'email' | 'name' | 'status' | 'last_login_at'>>(
+      pool,
       'SELECT id, username, email, name, status, last_login_at FROM admins WHERE id = ?',
       [adminId]
     );
@@ -110,7 +114,8 @@ export const changeAdminPassword = async (req: AdminRequest, res: Response) => {
     }
 
     // 查询管理员
-    const [admins] = await pool.query<Admin[]>(
+    const [admins] = await query<Admin>(
+      pool,
       'SELECT * FROM admins WHERE id = ?',
       [adminId]
     );
@@ -129,6 +134,10 @@ export const changeAdminPassword = async (req: AdminRequest, res: Response) => {
 
     // 加密新密码
     const hashedPassword = await bcrypt.hash(newPassword, 10);
+    console.log('Admin password hash generated:', {
+      adminId,
+      hashedPassword,
+    });
 
     // 更新密码
     await query(pool, 

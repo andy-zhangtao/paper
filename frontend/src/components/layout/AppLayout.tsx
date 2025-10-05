@@ -4,9 +4,10 @@ import { Sidebar } from './Sidebar'
 
 interface AppLayoutProps {
   children: ReactNode
+  onLoginClick?: () => void
 }
 
-export const AppLayout = ({ children }: AppLayoutProps) => {
+export const AppLayout = ({ children, onLoginClick }: AppLayoutProps) => {
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
   return (
@@ -14,10 +15,10 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
       {/* 顶部导航 */}
       <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
 
-      {/* 主布局：侧边栏 + 内容区 */}
+      {/* 主布局:侧边栏 + 内容区 */}
       <div className="pt-16 flex">
         {/* 侧边栏 */}
-        <Sidebar isOpen={sidebarOpen} />
+        <Sidebar isOpen={sidebarOpen} onLoginClick={onLoginClick} />
 
         {/* 主内容区 */}
         <main className="flex-1 min-h-[calc(100vh-4rem)]">

@@ -1,6 +1,7 @@
 import { Response } from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
-import { query } from '../utils/pgQuery';
+import { execute, query } from '../utils/pgQuery';
 import { AuthRequest } from '../middleware/auth';
 
 /**
@@ -10,12 +11,13 @@ export const getBalance = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
 
-    const [users] = await query(pool, 
+    const [users] = await query<{ credits: number; is_vip: boolean | number }>(
+      pool,
       'SELECT credits, is_vip FROM users WHERE id = ?',
       [userId]
     );
 
-    if (!Array.isArray(users) || users.length === 0) {
+    if (users.length === 0) {
       return res.status(404).json({
         success: false,
         error: {
@@ -25,7 +27,7 @@ export const getBalance = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const user = users[0] as any;
+    const user = users[0];
 
     return res.status(200).json({
       success: true,
@@ -56,7 +58,15 @@ export const getTransactions = async (req: AuthRequest, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = (page - 1) * limit;
 
-    const [transactions] = await query(pool, 
+    const [transactions] = await query<{
+      id: string;
+      type: string;
+      amount: number;
+      balance_after: number;
+      description: string | null;
+      created_at: Date;
+    }>(
+      pool,
       `SELECT id, type, amount, balance_after, description, created_at
        FROM credit_transactions
        WHERE user_id = ?
@@ -65,12 +75,13 @@ export const getTransactions = async (req: AuthRequest, res: Response) => {
       [userId, limit, offset]
     );
 
-    const [countResult] = await query(pool, 
+    const [countResult] = await query<{ total: number }>(
+      pool,
       'SELECT COUNT(*) as total FROM credit_transactions WHERE user_id = ?',
       [userId]
     );
 
-    const total = (countResult as any)[0].total;
+    const total = countResult[0]?.total ?? 0;
 
     return res.status(200).json({
       success: true,
@@ -113,17 +124,18 @@ export const deductCredits = async (
     await connection.query('BEGIN');
 
     // 查询当前余额
-    const [users] = await connection.query(
+    const [users] = await query<{ credits: number }>(
+      connection,
       'SELECT credits FROM users WHERE id = ? FOR UPDATE',
       [userId]
     );
 
-    if (!Array.isArray(users) || users.length === 0) {
+    if (users.length === 0) {
       await connection.query('ROLLBACK');
       return null;
     }
 
-    const currentCredits = (users[0] as any).credits;
+    const currentCredits = users[0].credits;
 
     // 检查余额是否足够
     if (currentCredits < amount) {
@@ -134,17 +146,19 @@ export const deductCredits = async (
     const newBalance = currentCredits - amount;
 
     // 更新用户余额
-    await connection.query(
+    await execute(
+      connection,
       'UPDATE users SET credits = ?, updated_at = ? WHERE id = ?',
       [newBalance, new Date(), userId]
     );
 
     // 记录流水
-    await connection.query(
+    await execute(
+      connection,
       `INSERT INTO credit_transactions (id, user_id, type, amount, balance_after, description, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        require('uuid').v4(),
+        uuidv4(),
         userId,
         'consume',
         -amount,
@@ -182,28 +196,29 @@ export const addCredits = async (
     await connection.query('BEGIN');
 
     // 查询当前余额
-    const [users] = await connection.query(
+    const [users] = await query<{ credits: number }>(
+      connection,
       'SELECT credits FROM users WHERE id = ? FOR UPDATE',
       [userId]
     );
 
-    const currentCredits = Array.isArray(users) && users.length > 0
-      ? (users[0] as any).credits
-      : 0;
+    const currentCredits = users.length > 0 ? users[0].credits : 0;
     const newBalance = currentCredits + amount;
 
     // 更新用户余额
-    await connection.query(
+    await execute(
+      connection,
       'UPDATE users SET credits = ?, updated_at = ? WHERE id = ?',
       [newBalance, new Date(), userId]
     );
 
     // 记录流水
-    await connection.query(
+    await execute(
+      connection,
       `INSERT INTO credit_transactions (id, user_id, type, amount, balance_after, description, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        require('uuid').v4(),
+        uuidv4(),
         userId,
         'recharge',
         amount,

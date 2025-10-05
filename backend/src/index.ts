@@ -1,9 +1,8 @@
 import express, { Request, Response } from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import { testConnection } from './config/database';
 import authRoutes from './routes/authRoutes';
-import { SERVER_CONFIG, CORS_CONFIG } from './config/constants';
+import { SERVER_CONFIG } from './config/constants';
 
 // 加载环境变量
 dotenv.config();
@@ -11,10 +10,7 @@ dotenv.config();
 const app = express();
 
 // 中间件
-app.use(cors({
-  origin: CORS_CONFIG.origin,
-  credentials: CORS_CONFIG.credentials,
-}));
+// CORS 已由 Nginx 统一处理，后端不再配置
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -28,14 +24,18 @@ import aiRoutes from './routes/aiRoutes';
 app.use('/api/ai', aiRoutes);
 import userRoutes from './routes/userRoutes';
 app.use('/api/user', userRoutes);
+import paperCreationRoutes from './routes/paperCreationRoutes';
+app.use('/api/paper-creation', paperCreationRoutes);
 
 // 管理员路由
 import adminAuthRoutes from './routes/adminAuthRoutes';
 import adminUserRoutes from './routes/adminUserRoutes';
 import adminStatsRoutes from './routes/adminStatsRoutes';
+import adminPromptTemplateRoutes from './routes/adminPromptTemplateRoutes';
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/users', adminUserRoutes);
 app.use('/api/admin/stats', adminStatsRoutes);
+app.use('/api/admin/prompts', adminPromptTemplateRoutes);
 
 // 健康检查
 app.get('/health', (req: Request, res: Response) => {

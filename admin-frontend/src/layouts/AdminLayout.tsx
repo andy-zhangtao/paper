@@ -17,6 +17,7 @@ export default function AdminLayout() {
   const menuItems = [
     { path: '/dashboard', label: '数据概览', icon: '📊' },
     { path: '/users', label: '用户管理', icon: '👥' },
+    { path: '/prompt-templates', label: '提示词模版', icon: '🧠' },
   ];
 
   return (

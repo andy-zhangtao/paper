@@ -137,13 +137,18 @@ fi
 
 # 准备SQL脚本
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SQL_FILE="$SCRIPT_DIR/../../backend/database/schema.sql"
+SQL_FILES=(
+    "$SCRIPT_DIR/../../backend/database/schema.sql"
+    "$SCRIPT_DIR/prompt_templates.sql"
+)
 
-if [ ! -f "$SQL_FILE" ]; then
-    echo "❌ 错误：找不到 SQL 文件 $SQL_FILE"
-    unset PGPASSWORD
-    exit 1
-fi
+for SQL_FILE in "${SQL_FILES[@]}"; do
+    if [ ! -f "$SQL_FILE" ]; then
+        echo "❌ 错误：找不到 SQL 文件 $SQL_FILE"
+        unset PGPASSWORD
+        exit 1
+    fi
+done
 
 # 执行SQL脚本
 if [ "$INCREMENTAL" = true ]; then
@@ -154,26 +159,36 @@ if [ "$INCREMENTAL" = true ]; then
     echo "  - 插入初始数据（如果不存在）"
     echo ""
 
-    # PostgreSQL的CREATE IF NOT EXISTS会自动跳过已存在的对象
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$SQL_FILE" 2>&1 | while read line; do
-        # 过滤掉"已存在"的警告信息,只显示错误
-        if [[ ! "$line" =~ "already exists" ]] && [[ ! "$line" =~ "duplicate key" ]]; then
-            echo "$line"
+    for SQL_FILE in "${SQL_FILES[@]}"; do
+        echo "🚀 运行 $(basename "$SQL_FILE")..."
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$SQL_FILE" 2>&1 | while read -r line; do
+            # 过滤掉"已存在"的警告信息，只显示错误
+            if [[ ! "$line" =~ "already exists" ]] && [[ ! "$line" =~ "duplicate key" ]]; then
+                echo "$line"
+            fi
+        done
+
+        if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+            echo "❌ 执行 SQL 文件 $(basename "$SQL_FILE") 失败"
+            unset PGPASSWORD
+            exit 1
         fi
     done
 
     echo "✅ 增量初始化完成"
 else
     echo "📦 执行完整初始化..."
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$SQL_FILE"
 
-    if [ $? -eq 0 ]; then
-        echo "✅ 数据库完整初始化成功"
-    else
-        echo "❌ 数据库初始化失败"
-        unset PGPASSWORD
-        exit 1
-    fi
+    for SQL_FILE in "${SQL_FILES[@]}"; do
+        echo "🚀 运行 $(basename "$SQL_FILE")..."
+        if ! psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$SQL_FILE"; then
+            echo "❌ 执行 SQL 文件 $(basename "$SQL_FILE") 失败"
+            unset PGPASSWORD
+            exit 1
+        fi
+    done
+
+    echo "✅ 数据库完整初始化成功"
 fi
 
 # 验证数据库结构

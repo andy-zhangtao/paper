@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import UsersPage from './pages/UsersPage';
+import PromptTemplatesPage from './pages/PromptTemplatesPage';
 import AdminLayout from './layouts/AdminLayout';
 
 // 路由守卫组件
@@ -29,6 +30,7 @@ function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="prompt-templates" element={<PromptTemplatesPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

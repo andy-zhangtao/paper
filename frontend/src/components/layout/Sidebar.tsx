@@ -1,8 +1,10 @@
-import { Home, FileText, Coins, Settings, LogOut } from 'lucide-react'
+import { Home, FileText, Coins, Settings, LogOut, LogIn } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface SidebarProps {
   isOpen?: boolean
+  onLoginClick?: () => void
 }
 
 const navItems = [
@@ -12,7 +14,9 @@ const navItems = [
   { icon: Settings, label: '设置', path: '/settings' },
 ]
 
-export const Sidebar = ({ isOpen = true }: SidebarProps) => {
+export const Sidebar = ({ isOpen = true, onLoginClick }: SidebarProps) => {
+  const { isAuthenticated, logout } = useAuth()
+
   return (
     <aside
       className={`
@@ -37,14 +41,26 @@ export const Sidebar = ({ isOpen = true }: SidebarProps) => {
           ))}
         </nav>
 
-        {/* 底部：退出按钮 */}
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-3 text-red-600 hover:bg-red-50"
-        >
-          <LogOut className="w-5 h-5" />
-          <span>退出登录</span>
-        </Button>
+        {/* 底部：登录/退出按钮 */}
+        {isAuthenticated ? (
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 text-red-600 hover:bg-red-50"
+            onClick={logout}
+          >
+            <LogOut className="w-5 h-5" />
+            <span>退出登录</span>
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 text-purple-600 hover:bg-purple-50"
+            onClick={onLoginClick}
+          >
+            <LogIn className="w-5 h-5" />
+            <span>登录</span>
+          </Button>
+        )}
       </div>
     </aside>
   )

@@ -45,6 +45,19 @@ export const AI_MODELS = {
 };
 
 /**
+ * OpenRouter通用配置
+ */
+export const OPENROUTER_CONFIG = {
+  // 默认调用的模型名称，优先读取独立配置
+  modelName:
+    process.env.OPENROUTER_MODEL_NAME ||
+    process.env.OPENROUTER_MODEL_DEFAULT ||
+    'openai/gpt-3.5-turbo',
+  // OpenRouter 专用代理地址，优先级高于全局 HTTPS_PROXY
+  proxyUrl: process.env.OPENROUTER_PROXY_URL || process.env.HTTPS_PROXY || '',
+};
+
+/**
  * AI调用参数配置
  */
 export const AI_PARAMS = {
@@ -194,7 +207,9 @@ export const LOG_CONFIG = {
  * CORS配置
  */
 export const CORS_CONFIG = {
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',')
+    : ['http://localhost:5173', 'http://localhost:5174'],
   credentials: true,
 };
 
@@ -273,6 +288,7 @@ export type Config = {
   AI_CREDITS_COST: typeof AI_CREDITS_COST;
   REWARDS: typeof REWARDS;
   AI_MODELS: typeof AI_MODELS;
+  OPENROUTER_CONFIG: typeof OPENROUTER_CONFIG;
   AI_PARAMS: typeof AI_PARAMS;
   PAGINATION: typeof PAGINATION;
   RATE_LIMITS: typeof RATE_LIMITS;
